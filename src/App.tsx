@@ -635,33 +635,42 @@ const App = () => {
     }))
   }
 
+  const totalOpenSpots = events.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0)
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-5">
-          <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">Campus co-hosting</p>
-            <h1 className="text-3xl font-black text-white">CoHost</h1>
-          </div>
-          <button
-            type="button"
-            onClick={handleContinueWithoutEmail}
-            className="rounded-full border border-cyan-400 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
-          >
-            {authUserId ? 'Account saved on this device' : 'Continue without email'}
-          </button>
+    <div className="app-shell">
+      <a className="skip-link" href="#events">Skip to events</a>
+      <header className="site-header">
+        <div className="header-inner">
+          <a href="#" className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
+          <nav aria-label="Main navigation"><a href="#events">Find an event</a><a href={activeProfile?.profileType === 'organization' ? '#host' : '#profile'}>Host an event</a></nav>
+          <button type="button" onClick={handleContinueWithoutEmail} className="button-secondary account-button">{authUserId ? 'Account saved on this device' : 'Continue without email'}</button>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-6 py-10">
+
+      <main className="main-content">
+        <section className="welcome" aria-labelledby="welcome-title">
+          <div>
+            <p className="eyebrow">CoHost</p>
+            <h2 id="welcome-title">Use CoHost now</h2>
+            <p className="welcome-copy">Find an event to join or plan one with another club.</p>
+            <a className="text-link" href="#events">Browse events</a>
+          </div>
+          <dl className="community-stats" aria-label="Community event activity">
+            <div><dt>Events on the board</dt><dd>{events.length}</dd></div>
+            <div><dt>Open places</dt><dd>{totalOpenSpots}</dd></div>
+            <div><dt>Your profiles</dt><dd>{profiles.length}</dd></div>
+          </dl>
+        </section>
         {statusMessage ? (
-          <div className="mb-6 rounded-2xl border border-emerald-500/50 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          <div aria-live="polite" className="status-note">
             {statusMessage}
           </div>
         ) : null}
         {errorMessage ? (
           <div
             role="alert"
-            className="mb-6 rounded-2xl border border-rose-500/50 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
+            className="error-note"
           >
             {errorMessage}
           </div>
@@ -715,6 +724,7 @@ const App = () => {
             onMarkRead={markNotificationRead}
           />
         )}
+        <footer className="site-footer"><span>CoHost</span><a href="#">Back to top</a></footer>
       </main>
     </div>
   )

@@ -39,12 +39,12 @@ export const ProfilePanel = ({
   authUserId,
   onSelectProfile,
 }: ProfilePanelProps) => (
-  <section className="panel" aria-labelledby="active-profile-heading">
-    <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Active profile</p>
+  <section id="profile" className="panel" aria-labelledby="active-profile-heading">
+    <p className="text-sm uppercase tracking-[0.2em] text-stone-600">Active profile</p>
     {activeProfile ? (
       <>
         {profiles.length > 1 ? (
-          <label className="mt-3 block space-y-2 text-sm text-slate-200">
+          <label className="form-field mt-3">
             <span>Use CoHost as</span>
             <select
               aria-label="Active profile"
@@ -60,33 +60,33 @@ export const ProfilePanel = ({
             </select>
           </label>
         ) : null}
-        <h2 id="active-profile-heading" className="mt-4 text-2xl font-bold text-white">
+        <h2 id="active-profile-heading" className="mt-4 text-2xl font-bold text-stone-900">
           {activeProfile.name}
         </h2>
-        <p className="mt-2 inline-flex rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-xs font-semibold capitalize text-cyan-200">
+        <p className="mt-2 inline-flex border border-orange-800/25 bg-orange-800/5 px-3 py-1 text-xs font-semibold capitalize text-orange-800">
           {activeProfile.profileType}
         </p>
         {activeProfile.profileType === 'organization' ? (
-          <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             Organization profile · not verified administrator authorization
           </p>
         ) : null}
-        <p className="mt-3 text-sm text-slate-300">{activeProfile.focus}</p>
-        <dl className="mt-4 space-y-2 text-sm text-slate-300">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-2">
+        <p className="mt-3 text-sm text-stone-600">{activeProfile.focus}</p>
+        <dl className="mt-4 space-y-2 text-sm text-stone-600">
+          <div className="flex items-center justify-between gap-3 border-b border-stone-200 pb-2">
             <dt>Location</dt>
             <dd>{activeProfile.location}</dd>
           </div>
-          <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-2">
+          <div className="flex items-center justify-between gap-3 border-b border-stone-200 pb-2">
             <dt>Profile status</dt>
             <dd>{authUserId ? 'Saved on this device' : 'Guest mode'}</dd>
           </div>
         </dl>
-        <p className="mt-4 text-sm text-slate-300">{activeProfile.description}</p>
+        <p className="mt-4 text-sm text-stone-600">{activeProfile.description}</p>
       </>
     ) : (
-      <p className="mt-3 text-sm text-slate-400">
-        No profile yet. Create one below to get started.
+      <p className="mt-3 text-sm text-stone-600">
+        Create a profile below to join events.
       </p>
     )}
   </section>
@@ -106,12 +106,12 @@ export const CreateProfileForm = ({
   onSubmit,
 }: CreateProfileFormProps) => (
   <section className="panel">
-    <h2 className="text-2xl font-bold text-white">Create a profile</h2>
-    <p className="mt-2 text-sm text-slate-400">
-      Identify yourself as a student or an organization. This is included with event requests.
+    <h2 className="text-2xl font-bold text-stone-900">Create a profile</h2>
+    <p className="mt-2 text-sm text-stone-600">
+      Your profile tells hosts who is joining.
     </p>
-    <form className="mt-5 space-y-4" onSubmit={onSubmit}>
-      <label className="block space-y-2 text-sm text-slate-200">
+    <form className="form-stack" onSubmit={onSubmit}>
+      <label className="form-field">
         <span>I am a</span>
         <select
           aria-label="Profile type"
@@ -124,7 +124,7 @@ export const CreateProfileForm = ({
           <option value="organization">Organization or club</option>
         </select>
       </label>
-      <label className="block space-y-2 text-sm text-slate-200">
+      <label className="form-field">
         <span>{profileForm.profileType === 'student' ? 'Your name' : 'Organization name'}</span>
         <input
           aria-label={profileForm.profileType === 'student' ? 'Your name' : 'Organization name'}
@@ -135,7 +135,7 @@ export const CreateProfileForm = ({
           placeholder={profileForm.profileType === 'student' ? 'Alex Morgan' : 'Northwind Club'}
         />
       </label>
-      <label className="block space-y-2 text-sm text-slate-200">
+      <label className="form-field">
         <span>Area of interest</span>
         <select
           aria-label="Area of interest"
@@ -151,7 +151,7 @@ export const CreateProfileForm = ({
           <option>Arts and cultural programming</option>
         </select>
       </label>
-      <label className="block space-y-2 text-sm text-slate-200">
+      <label className="form-field">
         <span>Location</span>
         <input
           aria-label="Profile location"
@@ -162,15 +162,15 @@ export const CreateProfileForm = ({
           placeholder="North campus"
         />
       </label>
-      <label className="block space-y-2 text-sm text-slate-200">
+      <label className="form-field">
         <span>About you</span>
         <textarea
           aria-label="Profile description"
           name="description"
           value={profileForm.description}
           onChange={onFieldChange}
-          className="input min-h-24"
-          placeholder="Share what kinds of events you want to attend or host."
+          className="input"
+          placeholder="What are you interested in?"
         />
       </label>
       <button type="submit" className="button-primary">
@@ -192,40 +192,40 @@ export const InboxPanel = ({ inbox, profileId, onMarkRead }: InboxPanelProps) =>
   return (
     <section className="panel">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-2xl font-bold text-white">Inbox</h2>
-        <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-300">
+        <h2 className="text-2xl font-bold text-stone-900">Inbox</h2>
+        <span className="border border-stone-300 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-600">
           {profileInbox.filter((entry) => !entry.isRead).length} new
         </span>
       </div>
       <div className="mt-5 space-y-3">
         {profileInbox.length === 0 ? (
-          <p className="text-sm text-slate-400">Your inbox is empty.</p>
+          <p className="text-sm text-stone-600">Your inbox is empty.</p>
         ) : (
           profileInbox.map((notice) => (
             <article
               key={notice.id}
-              className={`rounded-2xl border p-4 ${
+              className={`border p-4 ${
                 notice.isRead
-                  ? 'border-slate-800 bg-slate-900/80'
-                  : 'border-cyan-500/40 bg-slate-900'
+                  ? 'border-stone-200 bg-stone-50'
+                  : 'border-orange-800/25 bg-stone-50'
               }`}
             >
               <div className="flex items-center justify-between gap-4">
-                <p className="text-sm font-semibold text-white">{notice.title}</p>
-                <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                <p className="text-sm font-semibold text-stone-900">{notice.title}</p>
+                <span className="border border-stone-300 px-2 py-0.5 text-[10px] uppercase tracking-wide text-stone-600">
                   {notice.type}
                 </span>
               </div>
-              <p className="mt-2 text-sm text-slate-300">{notice.message}</p>
+              <p className="mt-2 text-sm text-stone-600">{notice.message}</p>
               <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                <span className="text-[11px] uppercase tracking-wide text-stone-500">
                   {new Date(notice.createdAt).toLocaleDateString()}
                 </span>
                 {!notice.isRead ? (
                   <button
                     type="button"
                     onClick={() => onMarkRead(notice.id)}
-                    className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
+                    className="text-xs font-medium text-orange-800 hover:text-orange-800"
                   >
                     Mark read
                   </button>
@@ -267,23 +267,23 @@ export const EventList = ({
   onDatesChange,
   onRequest,
 }: EventListProps) => (
-  <section className="panel" aria-labelledby="opportunities-heading">
+  <section id="events" className="panel event-board" aria-labelledby="opportunities-heading">
     <div className="mb-6 flex items-center justify-between gap-3">
       <div>
-        <p className="text-sm uppercase tracking-[0.2em] text-slate-400">
+        <p className="text-sm uppercase tracking-[0.2em] text-stone-600">
           {requestKind === 'cohost' ? 'Collaboration opportunities' : 'Opportunities'}
         </p>
-        <h2 id="opportunities-heading" className="mt-2 text-2xl font-bold text-white">
+        <h2 id="opportunities-heading" className="mt-2 text-2xl font-bold text-stone-900">
           {requestKind === 'cohost' ? 'Request to co-host' : 'Available community events'}
         </h2>
       </div>
-      <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs font-medium text-slate-300">
+      <span className="border border-stone-300 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
         {events.length} opportunities
       </span>
     </div>
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid gap-6">
       {events.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-slate-700 px-5 py-8 text-sm text-slate-400 lg:col-span-2">
+        <p className="border border-dashed border-stone-300 px-5 py-8 text-sm text-stone-600 lg:col-span-2">
           No events have been posted yet.
         </p>
       ) : null}
@@ -301,71 +301,73 @@ export const EventList = ({
         return (
           <article
             key={event.id}
-            className="rounded-3xl border border-slate-800 bg-slate-900 p-5"
+            className="event-card"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">
+                <p className="text-xs uppercase tracking-[0.2em] text-orange-800">
                   Hosted by {event.hostName} · {event.hostProfileType}
                 </p>
-                <h3 className="mt-2 text-2xl font-bold text-white">{event.title}</h3>
+                <h3 className="mt-2 text-2xl font-bold text-stone-900">{event.title}</h3>
               </div>
-              <span className="rounded-full border border-emerald-500/50 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+              <span className="border border-emerald-800/20 bg-emerald-800/5 px-3 py-1 text-xs font-semibold text-emerald-800">
                 {Math.max(event.capacity - event.attendees, 0)} open
               </span>
             </div>
-            <p className="mt-4 text-sm text-slate-300">{event.description}</p>
-            <dl className="mt-4 space-y-2 text-sm text-slate-300">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <p className="mt-4 text-sm text-stone-600">{event.description}</p>
+            <dl className="mt-4 space-y-2 text-sm text-stone-600">
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2">
                 <dt>Location</dt>
                 <dd>{event.location}</dd>
               </div>
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2">
                 <dt>Capacity</dt>
                 <dd>{event.capacity} total</dd>
               </div>
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2">
                 <dt>Attendees</dt>
                 <dd>{event.attendees}</dd>
               </div>
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2">
                 <dt>Open to</dt>
                 <dd>
                   {event.audience === 'everyone' ? 'Students and organizations' : 'Organizations only'}
                 </dd>
               </div>
             </dl>
-            <p className="mt-4 text-sm text-slate-300">
+            <p className="mt-4 text-sm text-stone-600">
               Dates: {formatDateLabel(event.dateOptions[0])} –{' '}
               {formatDateLabel(event.dateOptions[event.dateOptions.length - 1])}
             </p>
             {isOwnEvent ? (
-              <p className="mt-5 border-t border-slate-800 pt-5 text-sm text-slate-400">
+              <p className="mt-5 border-t border-stone-200 pt-5 text-sm text-stone-600">
                 You are hosting this event and cannot request to join it.
               </p>
             ) : event.audience === 'organizations' &&
               activeProfile?.profileType === 'student' ? (
-              <p className="mt-5 border-t border-slate-800 pt-5 text-sm text-amber-200">
+              <p className="mt-5 border-t border-stone-200 pt-5 text-sm text-amber-800">
                 This event is open to organizations only. Switch to an organization profile to request a
                 spot.
               </p>
+            ) : !activeProfile ? (
+              <p className="join-prompt"><a href="#profile" className="text-link">Create a profile to join</a></p>
             ) : (
               <form
-                className="mt-5 space-y-4 border-t border-slate-800 pt-5"
+                className="form-stack border-t border-stone-200 pt-5"
                 onSubmit={(submitEvent) => {
                   submitEvent.preventDefault()
                   onRequest(event, requestKind)
                 }}
               >
-                <p className="text-sm text-slate-300">
+                <p className="text-sm text-stone-600">
                   Requesting as{' '}
-                  <span className="font-semibold capitalize text-cyan-200">
+                  <span className="font-semibold capitalize text-orange-800">
                     {activeProfile?.profileType}
                   </span>{' '}
                   · {activeProfile?.name}
                 </p>
                 <fieldset>
-                  <legend className="mb-2 text-sm font-medium text-slate-200">
+                  <legend className="mb-2 text-sm font-medium text-stone-700">
                     Your availability
                   </legend>
                   <CalendarPicker
@@ -377,7 +379,7 @@ export const EventList = ({
                   />
                 </fieldset>
                 {activeProfile?.profileType === 'organization' ? (
-                  <label className="block max-w-xs space-y-2 text-sm text-slate-200">
+                  <label className="block max-w-xs space-y-2 text-sm text-stone-700">
                     <span>People from your organization</span>
                     <input
                       aria-label={`Participant count for ${event.title}`}
@@ -391,9 +393,9 @@ export const EventList = ({
                     />
                   </label>
                 ) : (
-                  <p className="text-sm text-slate-400">Your request is for one student.</p>
+                  <p className="text-sm text-stone-600">Your request is for one student.</p>
                 )}
-                <label className="block space-y-2 text-sm text-slate-200">
+                <label className="form-field">
                   <span>{requestKind === 'cohost' ? 'Co-hosting message' : 'Message'}</span>
                   <textarea
                     aria-label={`${requestKind === 'cohost' ? 'Co-hosting message' : 'Message'} for ${event.title}`}
@@ -401,7 +403,7 @@ export const EventList = ({
                     onChange={(inputEvent) =>
                       onDraftChange(event.id, 'message', inputEvent.target.value)
                     }
-                    className="input min-h-20"
+                    className="input"
                     placeholder={
                       requestKind === 'cohost'
                         ? 'Tell the host how your organization would like to collaborate.'
@@ -450,15 +452,15 @@ export const HostEventForm = ({
   onRangeChange,
   onSubmit,
 }: HostEventFormProps) => (
-  <section className="panel">
-    <h2 className="text-2xl font-bold text-white">Publish an event</h2>
-    <p className="mt-2 text-sm text-slate-400">
+  <section id="host" className="panel">
+    <h2 className="text-2xl font-bold text-stone-900">Publish an event</h2>
+    <p className="mt-2 text-sm text-stone-600">
       This profile can publish events as an organization. Profile type does not verify administrator
       authorization.
     </p>
-    <form className="mt-6 space-y-4" onSubmit={onSubmit}>
+    <form className="form-stack" onSubmit={onSubmit}>
       <div className="grid gap-4 md:grid-cols-2">
-        <label className="space-y-2 text-sm text-slate-200">
+        <label className="form-field">
           <span>Event title</span>
           <input
             aria-label="Event title"
@@ -469,7 +471,7 @@ export const HostEventForm = ({
             placeholder="Campus wellness fair"
           />
         </label>
-        <label className="space-y-2 text-sm text-slate-200">
+        <label className="form-field">
           <span>Location</span>
           <input
             aria-label="Event location"
@@ -481,7 +483,7 @@ export const HostEventForm = ({
           />
         </label>
       </div>
-      <label className="block max-w-xs space-y-2 text-sm text-slate-200">
+      <label className="block max-w-xs space-y-2 text-sm text-stone-700">
         <span>Capacity</span>
         <input
           aria-label="Event capacity"
@@ -494,7 +496,7 @@ export const HostEventForm = ({
         />
       </label>
       <fieldset>
-        <legend className="mb-2 text-sm text-slate-200">Event dates</legend>
+        <legend className="mb-2 text-sm text-stone-700">Event dates</legend>
         <CalendarPicker
           mode="range"
           startDate={hostForm.startDate}
@@ -502,7 +504,7 @@ export const HostEventForm = ({
           onRangeChange={onRangeChange}
         />
       </fieldset>
-      <label className="block space-y-2 text-sm text-slate-200">
+      <label className="form-field">
         <span>Who can join?</span>
         <select
           aria-label="Event audience"
@@ -515,15 +517,15 @@ export const HostEventForm = ({
           <option value="organizations">Organizations only</option>
         </select>
       </label>
-      <label className="block space-y-2 text-sm text-slate-200">
+      <label className="form-field">
         <span>Short description</span>
         <textarea
           aria-label="Event description"
           name="description"
           value={hostForm.description}
           onChange={onFieldChange}
-          className="input min-h-28"
-          placeholder="Tell other clubs how you want to collaborate and what your event needs."
+          className="input"
+          placeholder="What is the event about?"
         />
       </label>
       <button
@@ -697,7 +699,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
 
   return (
     <section className="panel" aria-labelledby="hosted-events-heading">
-      <h2 id="hosted-events-heading" className="text-2xl font-bold text-white">
+      <h2 id="hosted-events-heading" className="text-2xl font-bold text-stone-900">
         Managing hosted events
       </h2>
       {managementNotice ? (
@@ -707,7 +709,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
       ) : null}
       <div className="mt-4 space-y-3">
         {hostedEvents.length === 0 ? (
-          <p className="text-sm text-slate-400">Events published by this profile will appear here.</p>
+          <p className="text-sm text-stone-600">Events published by this profile will appear here.</p>
         ) : (
           hostedEvents.map((event) => {
             const isAuthorizedCreator = profile?.ownerId === event.hostOwnerId
@@ -716,12 +718,12 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
             return (
               <article
                 key={event.id}
-                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                className="border border-stone-200 bg-stone-50 p-4"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-slate-900">{event.title}</h3>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <h3 className="font-semibold text-stone-900">{event.title}</h3>
+                    <p className="mt-1 text-sm text-stone-600">
                       {event.location} · {event.attendees} / {event.capacity} participants
                     </p>
                   </div>
@@ -732,7 +734,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                       onClick={() =>
                         setViewingEventId((current) => (current === event.id ? null : event.id))
                       }
-                      className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                      className="border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-slate-100"
                     >
                       {viewingEventId === event.id ? 'Hide Details' : 'View Details'}
                     </button>
@@ -746,7 +748,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                             setEditValues(eventToEditValues(event))
                             setFeedback(null)
                           }}
-                          className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Edit
                         </button>
@@ -754,7 +756,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                           type="button"
                           disabled={deletingEventId === event.id || savingEventId === event.id}
                           onClick={() => void handleDelete(event)}
-                          className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {deletingEventId === event.id ? 'Deleting...' : 'Delete'}
                         </button>
@@ -763,38 +765,38 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                   </div>
                 </div>
                 {!isAuthorizedCreator ? (
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className="mt-3 text-xs text-stone-500">
                     Only the account that published this event can edit or delete it.
                   </p>
                 ) : null}
                 {viewingEventId === event.id ? (
                   <dl
                     role="region"
-                    className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-sm sm:grid-cols-2"
+                    className="mt-4 grid gap-3 border-t border-stone-200 pt-4 text-sm sm:grid-cols-2"
                     aria-label={`Details for ${event.title}`}
                   >
-                    <div><dt className="font-medium text-slate-600">Host</dt><dd className="text-slate-900">{event.hostName}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Host profile type</dt><dd className="capitalize text-slate-900">{event.hostProfileType}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Location</dt><dd className="text-slate-900">{event.location}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Dates</dt><dd className="text-slate-900">{event.dateOptions.map(formatDateLabel).join(', ') || 'No dates set'}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Audience</dt><dd className="text-slate-900">{event.audience === 'everyone' ? 'Everyone' : 'Organizations only'}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Capacity</dt><dd className="text-slate-900">{event.capacity}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Participants</dt><dd className="text-slate-900">{event.attendees}</dd></div>
-                    <div className="sm:col-span-2"><dt className="font-medium text-slate-600">Description</dt><dd className="whitespace-pre-wrap text-slate-900">{event.description}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Published</dt><dd className="text-slate-900">{new Date(event.createdAt).toLocaleString()}</dd></div>
-                    <div><dt className="font-medium text-slate-600">Event ID</dt><dd className="break-all text-slate-900">{event.id}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Host</dt><dd className="text-stone-900">{event.hostName}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Host profile type</dt><dd className="capitalize text-stone-900">{event.hostProfileType}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Location</dt><dd className="text-stone-900">{event.location}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Dates</dt><dd className="text-stone-900">{event.dateOptions.map(formatDateLabel).join(', ') || 'No dates set'}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Audience</dt><dd className="text-stone-900">{event.audience === 'everyone' ? 'Everyone' : 'Organizations only'}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Capacity</dt><dd className="text-stone-900">{event.capacity}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Participants</dt><dd className="text-stone-900">{event.attendees}</dd></div>
+                    <div className="sm:col-span-2"><dt className="font-medium text-stone-600">Description</dt><dd className="whitespace-pre-wrap text-stone-900">{event.description}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Published</dt><dd className="text-stone-900">{new Date(event.createdAt).toLocaleString()}</dd></div>
+                    <div><dt className="font-medium text-stone-600">Event ID</dt><dd className="break-all text-stone-900">{event.id}</dd></div>
                   </dl>
                 ) : null}
                 {isEditing && editValues ? (
                   <form
-                    className="mt-4 space-y-4 border-t border-slate-200 pt-4"
+                    className="form-stack border-t border-stone-200 pt-4"
                     onSubmit={(submitEvent) => {
                       submitEvent.preventDefault()
                       void handleSave(event)
                     }}
                   >
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="space-y-2 text-sm text-slate-700">
+                      <label className="form-field">
                         <span>Event title</span>
                         <input
                           aria-label={`Edit title for ${event.title}`}
@@ -805,7 +807,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                           className="input"
                         />
                       </label>
-                      <label className="space-y-2 text-sm text-slate-700">
+                      <label className="form-field">
                         <span>Location</span>
                         <input
                           aria-label={`Edit location for ${event.title}`}
@@ -816,7 +818,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                           className="input"
                         />
                       </label>
-                      <label className="space-y-2 text-sm text-slate-700">
+                      <label className="form-field">
                         <span>Capacity</span>
                         <input
                           aria-label={`Edit capacity for ${event.title}`}
@@ -829,7 +831,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                           className="input"
                         />
                       </label>
-                      <label className="space-y-2 text-sm text-slate-700">
+                      <label className="form-field">
                         <span>Audience</span>
                         <select
                           aria-label={`Edit audience for ${event.title}`}
@@ -844,7 +846,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                       </label>
                     </div>
                     <fieldset>
-                      <legend className="mb-2 text-sm text-slate-700">Event dates</legend>
+                      <legend className="mb-2 text-sm text-stone-700">Event dates</legend>
                       <CalendarPicker
                         mode="range"
                         startDate={editValues.startDate}
@@ -856,14 +858,14 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                         }
                       />
                     </fieldset>
-                    <label className="block space-y-2 text-sm text-slate-700">
+                    <label className="form-field">
                       <span>Description</span>
                       <textarea
                         aria-label={`Edit description for ${event.title}`}
                         name="description"
                         value={editValues.description}
                         onChange={updateEditField}
-                        className="input min-h-24"
+                        className="input"
                       />
                     </label>
                     <div className="flex flex-wrap gap-3">
@@ -882,7 +884,7 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
                           setEditValues(null)
                           setFeedback(null)
                         }}
-                        className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                        className="border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-slate-100"
                       >
                         Cancel
                       </button>
@@ -958,17 +960,17 @@ export const CollaborationRequests = ({
     return (
       <article
         key={request.id}
-        className="rounded-2xl border border-slate-700 bg-slate-900 p-4"
+        className="border border-stone-300 bg-stone-50 p-4"
       >
-        <p className="font-semibold text-white">
+        <p className="font-semibold text-stone-900">
           {isIncoming ? `${request.requesterName} requested ${requestLabel}` : `Request to ${requestLabel}`}
           {' for '}
           {eventTitle}
         </p>
-        <p className="mt-1 text-sm capitalize text-slate-300">
+        <p className="mt-1 text-sm capitalize text-stone-600">
           {request.status} · {request.availableDates.join(', ')}
         </p>
-        <p className="mt-2 text-sm text-slate-300">{request.message}</p>
+        <p className="mt-2 text-sm text-stone-600">{request.message}</p>
         {isIncoming && request.status === 'pending' ? (
           <div className="mt-4 flex gap-3">
             <button
@@ -981,7 +983,7 @@ export const CollaborationRequests = ({
             </button>
             <button
               type="button"
-              className="rounded-full border border-rose-400 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
+              className="border border-rose-400 px-4 py-2 text-sm font-semibold text-red-800 disabled:opacity-50"
               disabled={isResolving}
               onClick={() => void resolveRequest(request, 'declined')}
             >
@@ -995,21 +997,21 @@ export const CollaborationRequests = ({
 
   return (
     <section className="panel" aria-labelledby="collaboration-requests-heading">
-      <h2 id="collaboration-requests-heading" className="text-2xl font-bold text-white">
+      <h2 id="collaboration-requests-heading" className="text-2xl font-bold text-stone-900">
         Collaboration requests
       </h2>
       <div className="mt-4 space-y-3">
-        <h3 className="font-semibold text-white">Incoming requests</h3>
+        <h3 className="font-semibold text-stone-900">Incoming requests</h3>
         {incomingRequests.length === 0 ? (
-          <p className="text-sm text-slate-400">Requests for your events will appear here.</p>
+          <p className="text-sm text-stone-600">Requests for your events will appear here.</p>
         ) : (
           incomingRequests.map((request) => requestCard(request, true))
         )}
       </div>
       <div className="mt-5 space-y-3">
-        <h3 className="font-semibold text-white">Co-hosting requests you sent</h3>
+        <h3 className="font-semibold text-stone-900">Co-hosting requests you sent</h3>
         {outgoingRequests.length === 0 ? (
-          <p className="text-sm text-slate-400">Your sent co-hosting requests will appear here.</p>
+          <p className="text-sm text-stone-600">Your sent co-hosting requests will appear here.</p>
         ) : (
           outgoingRequests.map((request) => requestCard(request, false))
         )}

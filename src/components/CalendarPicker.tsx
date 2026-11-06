@@ -122,7 +122,7 @@ const CalendarPicker = (props: CalendarPickerProps) => {
           </button>
         </div>
       ) : (
-        <p className="mb-4 text-sm text-slate-400">
+        <p className="mb-4 text-sm text-stone-600">
           Select the dates you are available
           {props.selectedDates.length ? ` · ${props.selectedDates.length} selected` : ''}
         </p>
@@ -141,9 +141,9 @@ const CalendarPicker = (props: CalendarPickerProps) => {
           onClick={() => setVisibleMonth(previousMonth)}
           className="calendar-nav"
         >
-          ‹
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
         </button>
-        <h3 className="text-sm font-semibold text-white" aria-live="polite">
+        <h3 className="text-sm font-semibold text-stone-900" aria-live="polite">
           {visibleMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
         </h3>
         <button
@@ -154,7 +154,7 @@ const CalendarPicker = (props: CalendarPickerProps) => {
           }
           className="calendar-nav"
         >
-          ›
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg>
         </button>
       </div>
 
@@ -194,8 +194,8 @@ const CalendarPicker = (props: CalendarPickerProps) => {
       </div>
 
       {props.mode === 'range' ? (
-        <p className="mt-3 text-xs text-slate-400">
-          Choose a start date, then an end date. Dates in between are included.
+        <p className="mt-3 text-xs text-stone-600">
+          Select the first and last day.
         </p>
       ) : null}
       </div>
