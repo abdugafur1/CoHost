@@ -182,55 +182,62 @@ export const CreateProfileForm = ({
 
 interface InboxPanelProps {
   inbox: InboxNotice[]
+  profileId: string | null
   onMarkRead: (noticeId: string) => void
 }
 
-export const InboxPanel = ({ inbox, onMarkRead }: InboxPanelProps) => (
-  <section className="panel">
-    <div className="flex items-center justify-between gap-3">
-      <h2 className="text-2xl font-bold text-white">Inbox</h2>
-      <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-300">
-        {inbox.filter((entry) => !entry.isRead).length} new
-      </span>
-    </div>
-    <div className="mt-5 space-y-3">
-      {inbox.length === 0 ? (
-        <p className="text-sm text-slate-400">Your inbox is empty.</p>
-      ) : (
-        inbox.map((notice) => (
-          <article
-            key={notice.id}
-            className={`rounded-2xl border p-4 ${
-              notice.isRead ? 'border-slate-800 bg-slate-900/80' : 'border-cyan-500/40 bg-slate-900'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-4">
-              <p className="text-sm font-semibold text-white">{notice.title}</p>
-              <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
-                {notice.type}
-              </span>
-            </div>
-            <p className="mt-2 text-sm text-slate-300">{notice.message}</p>
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                {new Date(notice.createdAt).toLocaleDateString()}
-              </span>
-              {!notice.isRead ? (
-                <button
-                  type="button"
-                  onClick={() => onMarkRead(notice.id)}
-                  className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
-                >
-                  Mark read
-                </button>
-              ) : null}
-            </div>
-          </article>
-        ))
-      )}
-    </div>
-  </section>
-)
+export const InboxPanel = ({ inbox, profileId, onMarkRead }: InboxPanelProps) => {
+  const profileInbox = inbox.filter((notice) => notice.profileId === profileId)
+
+  return (
+    <section className="panel">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-2xl font-bold text-white">Inbox</h2>
+        <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-300">
+          {profileInbox.filter((entry) => !entry.isRead).length} new
+        </span>
+      </div>
+      <div className="mt-5 space-y-3">
+        {profileInbox.length === 0 ? (
+          <p className="text-sm text-slate-400">Your inbox is empty.</p>
+        ) : (
+          profileInbox.map((notice) => (
+            <article
+              key={notice.id}
+              className={`rounded-2xl border p-4 ${
+                notice.isRead
+                  ? 'border-slate-800 bg-slate-900/80'
+                  : 'border-cyan-500/40 bg-slate-900'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm font-semibold text-white">{notice.title}</p>
+                <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+                  {notice.type}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-300">{notice.message}</p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                  {new Date(notice.createdAt).toLocaleDateString()}
+                </span>
+                {!notice.isRead ? (
+                  <button
+                    type="button"
+                    onClick={() => onMarkRead(notice.id)}
+                    className="text-xs font-medium text-cyan-300 hover:text-cyan-200"
+                  >
+                    Mark read
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  )
+}
 
 interface EventListProps {
   events: EventItem[]
@@ -902,42 +909,111 @@ export const HostedEvents = ({ events, profile, onUpdate, onDelete }: HostedEven
 interface CollaborationRequestsProps {
   requests: EventRequest[]
   events: EventItem[]
+  profile: UserProfile | null
+  onResolveRequest: (
+    request: EventRequest,
+    status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
+  ) => Promise<void>
 }
 
-export const CollaborationRequests = ({ requests, events }: CollaborationRequestsProps) => (
-  <section className="panel" aria-labelledby="collaboration-requests-heading">
-    <h2 id="collaboration-requests-heading" className="text-2xl font-bold text-white">
-      Collaboration requests
-    </h2>
-    <div className="mt-4 space-y-3">
-      {requests.length === 0 ? (
-        <p className="text-sm text-slate-400">Co-hosting requests you send in this session appear here.</p>
-      ) : (
-        requests.map((request) => {
-          const event = events.find((item) => item.id === request.eventId)
-          return (
-            <article
-              key={request.id}
-              className="rounded-2xl border border-violet-200 bg-violet-50 p-4"
+export const CollaborationRequests = ({
+  requests,
+  events,
+  profile,
+  onResolveRequest,
+}: CollaborationRequestsProps) => {
+  const [resolvingRequestIds, setResolvingRequestIds] = useState<string[]>([])
+  const incomingRequests = requests.filter(
+    (request) =>
+      profile?.profileType === 'organization' &&
+      request.hostOwnerId === profile.ownerId &&
+      request.hostProfileId === profile.id,
+  )
+  const outgoingRequests = requests.filter(
+    (request) =>
+      profile?.profileType === 'organization' &&
+      request.requestType === 'cohost' &&
+      request.requesterOwnerId === profile.ownerId &&
+      request.requesterProfileId === profile.id,
+  )
+
+  const resolveRequest = async (
+    request: EventRequest,
+    status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
+  ) => {
+    setResolvingRequestIds((current) => [...current, request.id])
+    try {
+      await onResolveRequest(request, status)
+    } finally {
+      setResolvingRequestIds((current) => current.filter((id) => id !== request.id))
+    }
+  }
+
+  const requestCard = (request: EventRequest, isIncoming: boolean) => {
+    const eventTitle =
+      events.find((event) => event.id === request.eventId)?.title ?? request.eventTitle
+    const requestLabel = request.requestType === 'cohost' ? 'co-hosting' : 'participation'
+    const isResolving = resolvingRequestIds.indexOf(request.id) !== -1
+
+    return (
+      <article
+        key={request.id}
+        className="rounded-2xl border border-slate-700 bg-slate-900 p-4"
+      >
+        <p className="font-semibold text-white">
+          {isIncoming ? `${request.requesterName} requested ${requestLabel}` : `Request to ${requestLabel}`}
+          {' for '}
+          {eventTitle}
+        </p>
+        <p className="mt-1 text-sm capitalize text-slate-300">
+          {request.status} · {request.availableDates.join(', ')}
+        </p>
+        <p className="mt-2 text-sm text-slate-300">{request.message}</p>
+        {isIncoming && request.status === 'pending' ? (
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              className="button-primary"
+              disabled={isResolving}
+              onClick={() => void resolveRequest(request, 'accepted')}
             >
-              <p className="font-semibold text-slate-900">
-                Request to co-host {event?.title ?? 'an event'}
-              </p>
-              <p className="mt-1 text-sm text-slate-600">
-                Sent by {request.requesterName} · {request.status}
-              </p>
-              <p className="mt-2 text-sm text-slate-700">{request.message}</p>
-            </article>
-          )
-        })
-      )}
-    </div>
-    <div className="mt-5 rounded-xl border border-dashed border-slate-300 px-4 py-3">
-      <h3 className="font-semibold text-slate-800">Incoming requests</h3>
-      <p className="mt-1 text-sm text-slate-500">
-        Incoming request review and response are placeholders until shared request-reading and
-        management workflows are added.
-      </p>
-    </div>
-  </section>
-)
+              Accept
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-rose-400 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
+              disabled={isResolving}
+              onClick={() => void resolveRequest(request, 'declined')}
+            >
+              Decline
+            </button>
+          </div>
+        ) : null}
+      </article>
+    )
+  }
+
+  return (
+    <section className="panel" aria-labelledby="collaboration-requests-heading">
+      <h2 id="collaboration-requests-heading" className="text-2xl font-bold text-white">
+        Collaboration requests
+      </h2>
+      <div className="mt-4 space-y-3">
+        <h3 className="font-semibold text-white">Incoming requests</h3>
+        {incomingRequests.length === 0 ? (
+          <p className="text-sm text-slate-400">Requests for your events will appear here.</p>
+        ) : (
+          incomingRequests.map((request) => requestCard(request, true))
+        )}
+      </div>
+      <div className="mt-5 space-y-3">
+        <h3 className="font-semibold text-white">Co-hosting requests you sent</h3>
+        {outgoingRequests.length === 0 ? (
+          <p className="text-sm text-slate-400">Your sent co-hosting requests will appear here.</p>
+        ) : (
+          outgoingRequests.map((request) => requestCard(request, false))
+        )}
+      </div>
+    </section>
+  )
+}

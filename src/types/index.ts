@@ -27,11 +27,16 @@ export interface EventItem {
   attendees: number
   createdAt: string
   titleReservationId?: string
+  lastAcceptedParticipationRequestId?: string
 }
 
 export interface EventRequest {
   id: string
+  requestType: 'participation' | 'cohost'
   eventId: string
+  eventTitle: string
+  hostOwnerId: string
+  hostProfileId: string
   requesterOwnerId: string
   requesterProfileId: string
   requesterName: string
@@ -41,10 +46,13 @@ export interface EventRequest {
   message: string
   status: 'pending' | 'accepted' | 'declined'
   createdAt: string
+  resolvedAt?: string
+  resolvedByProfileId?: string
 }
 
 export interface InboxNotice {
   id: string
+  profileId: string
   title: string
   message: string
   type: 'incoming' | 'outgoing'

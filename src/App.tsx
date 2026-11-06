@@ -3,12 +3,15 @@ import './App.css'
 import {
   continueWithoutEmail,
   DuplicateEventTitleError,
+  createEventRequestId,
   deleteEventItem,
+  resolveEventRequest,
   saveUserProfile,
   saveEventItem,
   saveEventRequest,
   subscribeAuthUser,
   subscribeEvents,
+  subscribeEventRequests,
   subscribeUserProfiles,
   updateEventItem,
 } from './services/cohost'
@@ -103,12 +106,12 @@ const App = () => {
     initialProfileState.activeProfile,
   )
   const [events, setEvents] = useState<EventItem[]>([])
-  const [inbox, setInbox] = useState<InboxNotice[]>([])
+  const [eventRequests, setEventRequests] = useState<EventRequest[]>([])
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
   const [authUserId, setAuthUserId] = useState<string | null>(null)
   const [profileForm, setProfileForm] = useState(emptyProfileForm)
   const [hostForm, setHostForm] = useState(emptyHostForm)
   const [requestDrafts, setRequestDrafts] = useState<Record<string, RequestDraftValues>>({})
-  const [collaborationRequests, setCollaborationRequests] = useState<EventRequest[]>([])
   const [statusMessage, setStatusMessage] = useState('Create a profile to get started.')
   const [errorMessage, setErrorMessage] = useState<string | null>(initialProfileState.error)
   const [eventFormFeedback, setEventFormFeedback] = useState<{
@@ -131,6 +134,7 @@ const App = () => {
         (user) => {
           const nextUserId = user?.uid ?? null
           setAuthUserId(nextUserId)
+          if (!nextUserId) setEventRequests([])
         },
         (error) => setErrorMessage(`Could not restore your local account: ${error.message}`),
       ),
@@ -147,13 +151,27 @@ const App = () => {
   )
 
   useEffect(() => {
+    if (!authUserId || !activeProfile || activeProfile.ownerId !== authUserId) return
+
+    return subscribeEventRequests(
+      authUserId,
+      activeProfile.id,
+      activeProfile.profileType,
+      setEventRequests,
+      (error) => setErrorMessage(`Could not load event requests: ${error.message}`),
+    )
+  }, [authUserId, activeProfile])
+
+  useEffect(() => {
     if (!authUserId) return
 
     return subscribeUserProfiles(
       authUserId,
       (savedProfiles) => {
         try {
-          const localProfiles = loadLocalProfiles()
+          const localProfiles = loadLocalProfiles().filter(
+            (localProfile) => localProfile.ownerId === authUserId,
+          )
           const mergedProfiles = [
             ...savedProfiles,
             ...localProfiles.filter(
@@ -228,7 +246,10 @@ const App = () => {
     try {
       const user = await continueWithoutEmail()
       setAuthUserId(user.uid)
-      const localProfiles = loadLocalProfiles()
+      const deviceId = getLocalDeviceId()
+      const localProfiles = loadLocalProfiles().filter(
+        (profile) => profile.ownerId === user.uid || profile.ownerId === deviceId,
+      )
       const syncedProfiles = localProfiles.map((profile) => ({ ...profile, ownerId: user.uid }))
       saveLocalProfiles(syncedProfiles)
       setProfiles(syncedProfiles)
@@ -426,7 +447,7 @@ const App = () => {
     eventItem: EventItem,
     requestKind: 'participation' | 'cohost',
   ) => {
-    if (!activeProfile) {
+    if (!activeProfile || !authUserId || activeProfile.ownerId !== authUserId) {
       setErrorMessage('Create a profile before requesting to join an event.')
       return
     }
@@ -467,9 +488,24 @@ const App = () => {
       return
     }
 
+    const requestId = createEventRequestId(
+      eventItem.id,
+      activeProfile.ownerId,
+      activeProfile.id,
+      requestKind,
+    )
+    if (eventRequests.some((request) => request.id === requestId)) {
+      setErrorMessage('A request for this event has already been sent from this profile.')
+      return
+    }
+
     const newRequest: EventRequest = {
-      id: crypto.randomUUID(),
+      id: requestId,
+      requestType: requestKind,
       eventId: eventItem.id,
+      eventTitle: eventItem.title,
+      hostOwnerId: eventItem.hostOwnerId,
+      hostProfileId: eventItem.hostId,
       requesterOwnerId: activeProfile.ownerId,
       requesterProfileId: activeProfile.id,
       requesterName: activeProfile.name,
@@ -484,87 +520,63 @@ const App = () => {
       createdAt: new Date().toISOString(),
     }
 
-    if (requestKind === 'participation') {
-      setEvents((current) =>
-        current.map((item) =>
-          item.id === eventItem.id
-            ? {
-                ...item,
-                attendees: Math.min(item.capacity, item.attendees + attendeeCount),
-              }
-            : item,
-        ),
-      )
-    }
-
-    const newNotices: InboxNotice[] = [
-      {
-        id: crypto.randomUUID(),
-        title:
-          requestKind === 'cohost'
-            ? `Co-hosting request sent to ${eventItem.hostName}`
-            : `Participation request sent to ${eventItem.hostName}`,
-        message:
-          requestKind === 'cohost'
-            ? `${activeProfile.name} asked to co-host ${eventItem.title} on ${selectedDates.join(', ')}.`
-            : `${activeProfile.name} requested ${attendeeCount} ${
-                attendeeCount === 1 ? 'spot' : 'spots'
-              } on ${selectedDates.join(', ')}.`,
-        type: 'outgoing',
-        relatedEventId: eventItem.id,
-        createdAt: new Date().toISOString(),
-        isRead: false,
-      },
-      ...(requestKind === 'participation'
-        ? [
-            {
-              id: crypto.randomUUID(),
-              title: `New participation request for ${eventItem.title}`,
-              message: `${activeProfile.name} (${activeProfile.profileType}) wants to join on ${selectedDates.join(', ')} with ${attendeeCount} ${
-                attendeeCount === 1 ? 'person' : 'people'
-              }.`,
-              type: 'incoming' as const,
-              relatedEventId: eventItem.id,
-              createdAt: new Date().toISOString(),
-              isRead: false,
-            },
-          ]
-        : []),
-    ]
-    setInbox((current) => [...newNotices, ...current])
-
-    setRequestDrafts((current) => ({
-      ...current,
-      [eventItem.id]: { ...emptyDraft },
-    }))
-    setStatusMessage(
-      requestKind === 'cohost'
-        ? `Your co-hosting request for ${eventItem.title} has been sent.`
-        : `Your participation request for ${eventItem.title} has been sent.`,
-    )
-    setErrorMessage(null)
-
     try {
       await saveEventRequest(newRequest)
-      if (requestKind === 'cohost') {
-        setCollaborationRequests((current) => [newRequest, ...current])
-      }
-    } catch {
-      setErrorMessage('Request saved in the inbox locally, but Firebase write was unavailable.')
+      setRequestDrafts((current) => ({
+        ...current,
+        [eventItem.id]: { ...emptyDraft },
+      }))
+      setStatusMessage(
+        requestKind === 'cohost'
+          ? `Your co-hosting request for ${eventItem.title} has been sent.`
+          : `Your participation request for ${eventItem.title} has been sent.`,
+      )
+      setErrorMessage(null)
+    } catch (error) {
+      setErrorMessage(
+        `Could not send your request: ${
+          error instanceof Error ? error.message : 'unknown Firebase error'
+        }`,
+      )
     }
   }
 
   const markNotificationRead = (noticeId: string) => {
-    setInbox((current) =>
-      current.map((notice) =>
-        notice.id === noticeId
-          ? {
-              ...notice,
-              isRead: true,
-            }
-          : notice,
-      ),
+    setReadNotificationIds((current) =>
+      current.indexOf(noticeId) !== -1 ? current : [...current, noticeId],
     )
+  }
+
+  const handleResolveRequest = async (
+    eventRequest: EventRequest,
+    status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
+  ) => {
+    if (!authUserId || activeProfile?.ownerId !== authUserId) {
+      setErrorMessage('Sign in to the event host account before responding to requests.')
+      return
+    }
+    if (
+      activeProfile.profileType !== 'organization' ||
+      eventRequest.hostOwnerId !== authUserId ||
+      eventRequest.hostProfileId !== activeProfile.id
+    ) {
+      setErrorMessage('You are not authorized to respond to this request.')
+      return
+    }
+
+    try {
+      await resolveEventRequest(eventRequest, status, authUserId, activeProfile.id)
+      setStatusMessage(
+        `The ${eventRequest.requestType === 'cohost' ? 'co-hosting' : 'participation'} request was ${status}.`,
+      )
+      setErrorMessage(null)
+    } catch (error) {
+      setErrorMessage(
+        `Could not ${status === 'accepted' ? 'accept' : 'decline'} the request: ${
+          error instanceof Error ? error.message : 'unknown Firebase error'
+        }`,
+      )
+    }
   }
 
   const handleSelectProfile = (profileId: string) => {
@@ -573,6 +585,48 @@ const App = () => {
     saveActiveProfileId(selectedProfile.id)
     setActiveProfile(selectedProfile)
   }
+
+  const activeProfileRequests = activeProfile?.ownerId === authUserId
+    ? eventRequests.filter((request) => {
+        const isOutgoing =
+          request.requesterOwnerId === authUserId &&
+          request.requesterProfileId === activeProfile.id &&
+          (activeProfile.profileType === 'student'
+            ? request.requestType === 'participation'
+            : request.requestType === 'cohost')
+        const isIncoming =
+          activeProfile.profileType === 'organization' &&
+          request.hostOwnerId === authUserId &&
+          request.hostProfileId === activeProfile.id
+        return isOutgoing !== isIncoming
+      })
+    : []
+
+  const inbox: InboxNotice[] = activeProfileRequests.map((request) => {
+    const isOutgoing =
+      request.requesterOwnerId === authUserId &&
+      request.requesterProfileId === activeProfile?.id
+    const requestLabel = request.requestType === 'cohost' ? 'Co-hosting' : 'Participation'
+    const statusLabel = request.status[0].toUpperCase() + request.status.slice(1)
+    return {
+      id: request.id,
+      profileId: activeProfile?.id ?? '',
+      title: isOutgoing
+        ? `${requestLabel} request ${statusLabel.toLowerCase()}`
+        : request.status === 'pending'
+          ? `New ${requestLabel.toLowerCase()} request for ${request.eventTitle}`
+          : `${requestLabel} request ${statusLabel.toLowerCase()} for ${request.eventTitle}`,
+      message: isOutgoing
+        ? `Your request for ${request.eventTitle} is ${request.status}.`
+        : `${request.requesterName} requested ${request.attendeeCount} ${
+            request.attendeeCount === 1 ? 'spot' : 'spots'
+          } for ${request.eventTitle}.`,
+      type: isOutgoing ? 'outgoing' : 'incoming',
+      relatedEventId: request.eventId,
+      createdAt: request.createdAt,
+      isRead: readNotificationIds.indexOf(request.id) !== -1,
+    }
+  })
 
   const handleRequestDatesChange = (eventId: string, dates: string[]) => {
     setRequestDrafts((current) => ({
@@ -619,9 +673,7 @@ const App = () => {
             authUserId={authUserId}
             events={events}
             inbox={inbox}
-            collaborationRequests={collaborationRequests.filter(
-              (request) => request.requesterProfileId === activeProfile.id,
-            )}
+            collaborationRequests={activeProfileRequests}
             profileForm={profileForm}
             hostForm={hostForm}
             requestDrafts={requestDrafts}
@@ -642,6 +694,7 @@ const App = () => {
             onDraftChange={handleRequestDraftChange}
             onDatesChange={handleRequestDatesChange}
             onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
+            onResolveRequest={(request, status) => handleResolveRequest(request, status)}
             onMarkRead={markNotificationRead}
           />
         ) : (
