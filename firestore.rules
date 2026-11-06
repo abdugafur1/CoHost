@@ -18,27 +18,281 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
-      allow read: if true;
-      allow create: if owns(request.resource.data.hostOwnerId)
-        && request.resource.data.hostProfileType == 'organization';
-      allow update: if owns(resource.data.hostOwnerId)
-        && request.resource.data.hostOwnerId == resource.data.hostOwnerId;
-      allow delete: if owns(resource.data.hostOwnerId);
-    }
-
-    match /eventRequests/{requestId} {
-      function isEventHost() {
-        return signedIn()
-          && get(/databases/$(database)/documents/events/$(resource.data.eventId))
-            .data.hostOwnerId == request.auth.uid;
+      function hostProfilePath() {
+        return /databases/$(database)/documents/userProfiles/$(request.resource.data.hostId);
       }
 
-      allow create: if owns(request.resource.data.requesterOwnerId);
-      allow read: if owns(resource.data.requesterOwnerId) || isEventHost();
-      allow update: if isEventHost()
-        && request.resource.data.requesterOwnerId == resource.data.requesterOwnerId
-        && request.resource.data.eventId == resource.data.eventId;
-      allow delete: if owns(resource.data.requesterOwnerId) || isEventHost();
+      function attendanceIsValid() {
+        let currentAttendees = resource.data.attendees;
+        let nextAttendees = request.resource.data.attendees;
+        let currentRequestId = resource.data.get('lastAcceptedParticipationRequestId', '');
+        let nextRequestId = request.resource.data.get('lastAcceptedParticipationRequestId', '');
+        return nextAttendees == currentAttendees
+          ? nextRequestId == currentRequestId
+          : nextAttendees > currentAttendees
+            && nextAttendees <= request.resource.data.capacity
+            && nextRequestId is string
+            && exists(/databases/$(database)/documents/participationRequests/$(nextRequestId))
+            && get(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.status == 'pending'
+            && getAfter(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.status == 'accepted'
+            && getAfter(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.eventId == eventId
+            && getAfter(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.hostOwnerId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.hostProfileId == resource.data.hostId
+            && getAfter(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.requestType == 'participation'
+            && nextAttendees == currentAttendees
+              + get(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.attendeeCount;
+      }
+
+      allow read: if true;
+      allow create: if owns(request.resource.data.hostOwnerId)
+        && request.resource.data.hostProfileType == 'organization'
+        && exists(hostProfilePath())
+        && get(hostProfilePath()).data.ownerId == request.auth.uid
+        && get(hostProfilePath()).data.id == request.resource.data.hostId
+        && get(hostProfilePath()).data.profileType == 'organization'
+        && request.resource.data.attendees == 0
+        && !('lastAcceptedParticipationRequestId' in request.resource.data)
+        && request.resource.data.titleReservationId is string
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.eventId == eventId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostId == request.resource.data.hostId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostOwnerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.title == request.resource.data.title;
+      allow update: if owns(resource.data.hostOwnerId)
+        && request.resource.data.hostOwnerId == resource.data.hostOwnerId
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.hostProfileType == resource.data.hostProfileType
+        && exists(hostProfilePath())
+        && get(hostProfilePath()).data.ownerId == request.auth.uid
+        && get(hostProfilePath()).data.id == request.resource.data.hostId
+        && get(hostProfilePath()).data.profileType == 'organization'
+        && attendanceIsValid()
+        && request.resource.data.titleReservationId is string
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.eventId == eventId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostId == resource.data.hostId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostOwnerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.title == request.resource.data.title
+        && (!('titleReservationId' in resource.data)
+          || resource.data.titleReservationId == request.resource.data.titleReservationId
+          || !existsAfter(/databases/$(database)/documents/eventTitleReservations/$(resource.data.titleReservationId)));
+      allow delete: if owns(resource.data.hostOwnerId)
+        && (!('titleReservationId' in resource.data)
+          || !existsAfter(/databases/$(database)/documents/eventTitleReservations/$(resource.data.titleReservationId)));
+    }
+
+    match /eventTitleReservations/{reservationId} {
+      function matchingEvent() {
+        return getAfter(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data;
+      }
+
+      allow read: if signedIn();
+      allow create: if owns(request.resource.data.hostOwnerId)
+        && matchingEvent().titleReservationId == reservationId
+        && matchingEvent().hostId == request.resource.data.hostId
+        && matchingEvent().hostOwnerId == request.auth.uid
+        && matchingEvent().title == request.resource.data.title;
+      allow update: if false;
+      allow delete: if signedIn()
+        && exists(/databases/$(database)/documents/events/$(resource.data.eventId))
+        && owns(get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.hostOwnerId)
+        && get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.titleReservationId == reservationId
+        && (!existsAfter(/databases/$(database)/documents/events/$(resource.data.eventId))
+          || getAfter(/databases/$(database)/documents/events/$(resource.data.eventId)).data.titleReservationId != reservationId);
+    }
+
+    match /participationRequests/{requestId} {
+      function eventPath(eventId) {
+        return /databases/$(database)/documents/events/$(eventId);
+      }
+
+      function requesterProfilePath(profileId) {
+        return /databases/$(database)/documents/userProfiles/$(profileId);
+      }
+
+      function hostProfilePath(profileId) {
+        return /databases/$(database)/documents/userProfiles/$(profileId);
+      }
+
+      function validCreate() {
+        let eventDoc = eventPath(request.resource.data.eventId);
+        let requesterProfile = requesterProfilePath(request.resource.data.requesterProfileId);
+        let hostProfile = hostProfilePath(request.resource.data.hostProfileId);
+        return exists(eventDoc)
+          && exists(requesterProfile)
+          && exists(hostProfile)
+          && request.resource.data.keys().hasAll([
+            'requestType', 'eventId', 'eventTitle', 'hostOwnerId', 'hostProfileId', 'requesterOwnerId',
+            'requesterProfileId', 'requesterName', 'requesterProfileType',
+            'availableDates', 'attendeeCount', 'message', 'status', 'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'requestType', 'eventId', 'eventTitle', 'hostOwnerId', 'hostProfileId', 'requesterOwnerId',
+            'requesterProfileId', 'requesterName', 'requesterProfileType',
+            'availableDates', 'attendeeCount', 'message', 'status', 'createdAt'
+          ])
+          && requestId == request.resource.data.eventId + '_'
+            + request.resource.data.requesterOwnerId + '_'
+            + request.resource.data.requesterProfileId + '_participation'
+          && owns(request.resource.data.requesterOwnerId)
+          && request.resource.data.requestType == 'participation'
+          && request.resource.data.status == 'pending'
+          && request.resource.data.requesterProfileType == 'student'
+          && request.resource.data.attendeeCount == 1
+          && request.resource.data.availableDates is list
+          && request.resource.data.availableDates.size() > 0
+          && request.resource.data.message is string
+          && request.resource.data.createdAt is string
+          && get(eventDoc).data.hostOwnerId == request.resource.data.hostOwnerId
+          && get(eventDoc).data.hostId == request.resource.data.hostProfileId
+          && get(eventDoc).data.hostOwnerId != request.auth.uid
+          && get(eventDoc).data.hostProfileType == 'organization'
+          && get(eventDoc).data.audience == 'everyone'
+          && get(eventDoc).data.attendees < get(eventDoc).data.capacity
+          && request.resource.data.eventTitle == get(eventDoc).data.title
+          && request.resource.data.availableDates.hasOnly(get(eventDoc).data.dateOptions)
+          && get(requesterProfile).data.ownerId == request.auth.uid
+          && get(requesterProfile).data.id == request.resource.data.requesterProfileId
+          && get(requesterProfile).data.profileType == 'student'
+          && get(requesterProfile).data.profileType == request.resource.data.requesterProfileType
+          && get(requesterProfile).data.name == request.resource.data.requesterName
+          && get(hostProfile).data.ownerId == request.resource.data.hostOwnerId
+          && get(hostProfile).data.id == request.resource.data.hostProfileId
+          && get(hostProfile).data.profileType == 'organization'
+          && get(hostProfile).data.profileType == get(eventDoc).data.hostProfileType;
+      }
+
+      function hostOwnsRequest() {
+        let hostProfile = hostProfilePath(resource.data.hostProfileId);
+        return owns(resource.data.hostOwnerId)
+          && exists(hostProfile)
+          && get(hostProfile).data.ownerId == request.auth.uid
+          && get(hostProfile).data.profileType == 'organization';
+      }
+
+      function validResolution() {
+        let eventRef = /databases/$(database)/documents/events/$(resource.data.eventId);
+        let hostProfile = hostProfilePath(resource.data.hostProfileId);
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'resolvedAt', 'resolvedByProfileId'
+          ])
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['accepted', 'declined']
+          && request.resource.data.resolvedAt is string
+          && request.resource.data.resolvedByProfileId == resource.data.hostProfileId
+          && exists(hostProfile)
+          && get(hostProfile).data.ownerId == request.auth.uid
+          && get(hostProfile).data.profileType == 'organization'
+          && (
+            request.resource.data.status == 'accepted'
+              ? getAfter(eventRef).data.attendees == get(eventRef).data.attendees + resource.data.attendeeCount
+                && getAfter(eventRef).data.lastAcceptedParticipationRequestId == requestId
+              : getAfter(eventRef).data.attendees == get(eventRef).data.attendees
+                && getAfter(eventRef).data.get('lastAcceptedParticipationRequestId', '')
+                  == get(eventRef).data.get('lastAcceptedParticipationRequestId', '')
+          );
+      }
+
+      allow create: if validCreate();
+      allow get: if owns(resource.data.requesterOwnerId) || owns(resource.data.hostOwnerId);
+      allow list: if owns(resource.data.requesterOwnerId) || owns(resource.data.hostOwnerId);
+      allow update: if hostOwnsRequest()
+        && resource.data.requestType == 'participation'
+        && validResolution();
+      allow delete: if false;
+    }
+
+    match /cohostRequests/{requestId} {
+      function eventPath(eventId) {
+        return /databases/$(database)/documents/events/$(eventId);
+      }
+
+      function requesterProfilePath(profileId) {
+        return /databases/$(database)/documents/userProfiles/$(profileId);
+      }
+
+      function hostProfilePath(profileId) {
+        return /databases/$(database)/documents/userProfiles/$(profileId);
+      }
+
+      function validCreate() {
+        let eventDoc = eventPath(request.resource.data.eventId);
+        let requesterProfile = requesterProfilePath(request.resource.data.requesterProfileId);
+        let hostProfile = hostProfilePath(request.resource.data.hostProfileId);
+        return exists(eventDoc)
+          && exists(requesterProfile)
+          && exists(hostProfile)
+          && request.resource.data.keys().hasAll([
+            'requestType', 'eventId', 'eventTitle', 'hostOwnerId', 'hostProfileId', 'requesterOwnerId',
+            'requesterProfileId', 'requesterName', 'requesterProfileType',
+            'availableDates', 'attendeeCount', 'message', 'status', 'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'requestType', 'eventId', 'eventTitle', 'hostOwnerId', 'hostProfileId', 'requesterOwnerId',
+            'requesterProfileId', 'requesterName', 'requesterProfileType',
+            'availableDates', 'attendeeCount', 'message', 'status', 'createdAt'
+          ])
+          && requestId == request.resource.data.eventId + '_'
+            + request.resource.data.requesterOwnerId + '_'
+            + request.resource.data.requesterProfileId + '_cohost'
+          && owns(request.resource.data.requesterOwnerId)
+          && request.resource.data.requestType == 'cohost'
+          && request.resource.data.status == 'pending'
+          && request.resource.data.requesterProfileType == 'organization'
+          && request.resource.data.attendeeCount is int
+          && request.resource.data.attendeeCount > 0
+          && request.resource.data.availableDates is list
+          && request.resource.data.availableDates.size() > 0
+          && request.resource.data.message is string
+          && request.resource.data.createdAt is string
+          && get(eventDoc).data.hostOwnerId == request.resource.data.hostOwnerId
+          && get(eventDoc).data.hostId == request.resource.data.hostProfileId
+          && get(eventDoc).data.hostOwnerId != request.auth.uid
+          && get(eventDoc).data.hostProfileType == 'organization'
+          && request.resource.data.eventTitle == get(eventDoc).data.title
+          && request.resource.data.availableDates.hasOnly(get(eventDoc).data.dateOptions)
+          && get(requesterProfile).data.ownerId == request.auth.uid
+          && get(requesterProfile).data.id == request.resource.data.requesterProfileId
+          && get(requesterProfile).data.profileType == 'organization'
+          && get(requesterProfile).data.profileType == request.resource.data.requesterProfileType
+          && get(requesterProfile).data.name == request.resource.data.requesterName
+          && get(hostProfile).data.ownerId == request.resource.data.hostOwnerId
+          && get(hostProfile).data.id == request.resource.data.hostProfileId
+          && get(hostProfile).data.profileType == 'organization'
+          && get(hostProfile).data.profileType == get(eventDoc).data.hostProfileType;
+      }
+
+      function hostOwnsRequest() {
+        let hostProfile = hostProfilePath(resource.data.hostProfileId);
+        return owns(resource.data.hostOwnerId)
+          && exists(hostProfile)
+          && get(hostProfile).data.ownerId == request.auth.uid
+          && get(hostProfile).data.profileType == 'organization';
+      }
+
+      function validResolution() {
+        let eventRef = /databases/$(database)/documents/events/$(resource.data.eventId);
+        let hostProfile = hostProfilePath(resource.data.hostProfileId);
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'resolvedAt', 'resolvedByProfileId'
+          ])
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['accepted', 'declined']
+          && request.resource.data.resolvedAt is string
+          && request.resource.data.resolvedByProfileId == resource.data.hostProfileId
+          && exists(hostProfile)
+          && get(hostProfile).data.ownerId == request.auth.uid
+          && get(hostProfile).data.profileType == 'organization'
+          && getAfter(eventRef).data.attendees == get(eventRef).data.attendees
+          && getAfter(eventRef).data.get('lastAcceptedParticipationRequestId', '')
+            == get(eventRef).data.get('lastAcceptedParticipationRequestId', '');
+      }
+
+      allow create: if validCreate();
+      allow get: if owns(resource.data.requesterOwnerId) || owns(resource.data.hostOwnerId);
+      allow list: if owns(resource.data.requesterOwnerId) || owns(resource.data.hostOwnerId);
+      allow update: if hostOwnsRequest()
+        && resource.data.requestType == 'cohost'
+        && validResolution();
+      allow delete: if false;
     }
   }
 }

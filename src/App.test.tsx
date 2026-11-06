@@ -1,22 +1,36 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import {
   continueWithoutEmail,
+  DuplicateEventTitleError,
   saveEventItem,
   saveEventRequest,
   saveUserProfile,
+  subscribeAuthUser,
   subscribeEvents,
+  subscribeEventRequests,
 } from './services/cohost'
-import type { EventItem } from './types'
+import type { EventItem, EventRequest, UserProfile } from './types'
 
 vi.mock('./services/cohost', () => ({
   continueWithoutEmail: vi.fn(),
+  DuplicateEventTitleError: class DuplicateEventTitleError extends Error {
+    constructor() {
+      super('An event with this title already exists. Please choose a different title.')
+    }
+  },
+  createEventRequestId: vi.fn(
+    (eventId: string, ownerId: string, profileId: string, requestType: string) =>
+      `${eventId}_${ownerId}_${profileId}_${requestType}`,
+  ),
+  resolveEventRequest: vi.fn(),
   saveUserProfile: vi.fn(),
   saveEventItem: vi.fn(),
   saveEventRequest: vi.fn(),
   subscribeAuthUser: vi.fn(() => vi.fn()),
   subscribeEvents: vi.fn(() => vi.fn()),
+  subscribeEventRequests: vi.fn(() => vi.fn()),
   subscribeUserProfiles: vi.fn(() => vi.fn()),
 }))
 
@@ -42,10 +56,12 @@ describe('CoHost app', () => {
     expect(await screen.findByText(/your device account is ready/i)).toBeTruthy()
   })
 
-  it('allows organizations to post events while students can only request to join', async () => {
+  it('shows separate student and organization dashboards as profiles change', async () => {
     vi.mocked(continueWithoutEmail).mockResolvedValue({ uid: 'user-123' } as never)
     vi.mocked(saveUserProfile).mockResolvedValue(undefined)
-    vi.mocked(saveEventItem).mockResolvedValue(undefined)
+    vi.mocked(saveEventItem)
+      .mockRejectedValueOnce(new DuplicateEventTitleError())
+      .mockRejectedValueOnce(new Error('network unavailable'))
     vi.mocked(saveEventRequest).mockResolvedValue(undefined)
 
     render(<App />)
@@ -69,10 +85,9 @@ describe('CoHost app', () => {
         profileType: 'student',
       }),
     )
-    expect(screen.getByText(/only student organizations can post events/i)).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /post event/i }).closest('fieldset')?.hasAttribute('disabled'),
-    ).toBe(true)
+    expect(screen.getByText(/student dashboard/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /post event/i })).toBeNull()
+    expect(screen.getByText(/no events have been posted yet/i)).toBeTruthy()
 
     fireEvent.change(screen.getByRole('combobox', { name: /profile type/i }), {
       target: { value: 'organization' },
@@ -86,9 +101,13 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('button', { name: /save profile/i }))
 
     expect(await screen.findByRole('heading', { name: /campus volunteers/i })).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /post event/i }).closest('fieldset')?.hasAttribute('disabled'),
-    ).toBe(false)
+    expect(screen.getByText(/organization dashboard/i)).toBeTruthy()
+    expect((screen.getByRole('button', { name: /post event/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    expect(screen.getByText(/not verified administrator authorization/i)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /managing hosted events/i })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /collaboration requests/i })).toBeTruthy()
 
     fireEvent.change(screen.getByRole('textbox', { name: /event title/i }), {
       target: { value: 'Community Workshop' },
@@ -128,9 +147,49 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('button', { name: /start date/i }))
     fireEvent.click(screen.getByRole('button', { name: /post event/i }))
 
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'An event with this title already exists. Please choose a different title.',
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByRole('textbox', { name: /event title/i }) as HTMLInputElement).value).toBe(
+      'Community Workshop',
+    )
+    expect((screen.getByRole('textbox', { name: /event location/i }) as HTMLInputElement).value).toBe(
+      'Campus Center',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /post event/i }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not save the event: network unavailable',
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByRole('textbox', { name: /event title/i }) as HTMLInputElement).value).toBe(
+      'Community Workshop',
+    )
+
+    let resolveEventSave = () => {}
+    const pendingEventSave = new Promise<void>((resolve) => {
+      resolveEventSave = resolve
+    })
+    vi.mocked(saveEventItem).mockImplementation(() => pendingEventSave)
+    const publishButton = screen.getByRole('button', { name: /post event/i })
+    fireEvent.click(publishButton)
+    fireEvent.click(publishButton)
+    expect(saveEventItem).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('button', { name: /publishing\.\.\./i }).hasAttribute('disabled')).toBe(
+      true,
+    )
+
+    await act(async () => {
+      resolveEventSave()
+      await pendingEventSave
+    })
+
     expect(await screen.findByRole('heading', { name: /community workshop/i })).toBeTruthy()
     const eventSuccessMessage = screen.getByRole('status')
-    expect(eventSuccessMessage.textContent).toMatch(/community workshop was posted to the event board/i)
+    expect(eventSuccessMessage.textContent).toBe(
+      "Event 'Community Workshop' has been published successfully!",
+    )
     expect(eventSuccessMessage.closest('form')).toBeTruthy()
     expect((screen.getByRole('textbox', { name: /event title/i }) as HTMLInputElement).value).toBe('')
     expect((screen.getByRole('textbox', { name: /event location/i }) as HTMLInputElement).value).toBe('')
@@ -146,7 +205,8 @@ describe('CoHost app', () => {
         day < 10 ? `0${day}` : day
       }`
     }
-    expect(saveEventItem).toHaveBeenCalledWith(
+    expect(saveEventItem).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         hostOwnerId: 'user-123',
         hostProfileType: 'organization',
@@ -157,9 +217,8 @@ describe('CoHost app', () => {
     const activeProfileSelect = screen.getByRole('combobox', { name: /active profile/i })
     const studentOption = screen.getByRole('option', { name: /alex morgan — student/i })
     fireEvent.change(activeProfileSelect, { target: { value: (studentOption as HTMLOptionElement).value } })
-    expect(
-      screen.getByRole('button', { name: /post event/i }).closest('fieldset')?.hasAttribute('disabled'),
-    ).toBe(true)
+    expect(screen.getByText(/student dashboard/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /post event/i })).toBeNull()
     expect(screen.getByText(/you are hosting this event and cannot request to join it/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /send request/i })).toBeNull()
     expect(saveEventRequest).not.toHaveBeenCalled()
@@ -190,6 +249,196 @@ describe('CoHost app', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: /shared community event/i })).toBeTruthy()
+  })
+
+  it('sends participation requests without creating incoming notices or reserving attendance', async () => {
+    const sharedEvent: EventItem = {
+      id: 'shared-event-id',
+      hostId: 'host-profile-id',
+      hostOwnerId: 'host-user-id',
+      hostName: 'Campus Organization',
+      hostProfileType: 'organization',
+      title: 'Shared Community Event',
+      location: 'Student Center',
+      description: 'An event visible to other users.',
+      audience: 'everyone',
+      dateOptions: ['2027-11-15'],
+      capacity: 20,
+      attendees: 0,
+      createdAt: '2026-11-01T10:00:00.000Z',
+    }
+    vi.mocked(continueWithoutEmail).mockResolvedValue({ uid: 'student-user-id' } as never)
+    vi.mocked(saveUserProfile).mockResolvedValue(undefined)
+    vi.mocked(saveEventRequest).mockResolvedValue(undefined)
+    vi.mocked(subscribeEvents).mockImplementation((onEvents) => {
+      onEvents([sharedEvent])
+      return () => {}
+    })
+
+    render(<App />)
+    fireEvent.change(screen.getByRole('textbox', { name: /your name/i }), {
+      target: { value: 'Taylor Student' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: /profile location/i }), {
+      target: { value: 'North campus' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save profile/i }))
+
+    fireEvent.click(await screen.findByRole('button', { name: /send participation request/i }))
+
+    expect(await screen.findByText(/your participation request for shared community event has been sent/i)).toBeTruthy()
+    expect(saveEventRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestType: 'participation',
+        hostOwnerId: 'host-user-id',
+        hostProfileId: 'host-profile-id',
+        requesterOwnerId: 'student-user-id',
+        requesterProfileId: expect.any(String),
+        status: 'pending',
+      }),
+    )
+    expect(screen.getByText('0')).toBeTruthy()
+    expect(screen.getByText(/your inbox is empty/i)).toBeTruthy()
+  })
+
+  it('switches inbox and request subscriptions by profile even when profiles share one Firebase UID', async () => {
+    const ownerId = 'shared-owner'
+    const studentProfile: UserProfile = {
+      id: 'student-profile',
+      ownerId,
+      name: 'Student Profile',
+      profileType: 'student',
+      focus: 'Campus activities',
+      location: 'North campus',
+      description: '',
+      createdAt: '2026-10-01T10:00:00.000Z',
+    }
+    const organizationProfile: UserProfile = {
+      ...studentProfile,
+      id: 'organization-profile',
+      name: 'Organization Profile',
+      profileType: 'organization',
+    }
+    const studentRequest: EventRequest = {
+      id: 'student-request',
+      requestType: 'participation',
+      eventId: 'student-event',
+      eventTitle: 'Student Event',
+      hostOwnerId: 'host-owner',
+      hostProfileId: 'host-profile',
+      requesterOwnerId: ownerId,
+      requesterProfileId: studentProfile.id,
+      requesterName: studentProfile.name,
+      requesterProfileType: 'student',
+      availableDates: ['2027-01-01'],
+      attendeeCount: 1,
+      message: 'Joining.',
+      status: 'pending',
+      createdAt: '2026-10-02T10:00:00.000Z',
+    }
+    const organizationRequest: EventRequest = {
+      ...studentRequest,
+      id: 'organization-request',
+      requestType: 'cohost',
+      eventId: 'organization-event',
+      eventTitle: 'Organization Event',
+      requesterProfileId: organizationProfile.id,
+      requesterName: organizationProfile.name,
+      requesterProfileType: 'organization',
+    }
+    localStorage.setItem(
+      'cohost.userProfiles',
+      JSON.stringify([studentProfile, organizationProfile]),
+    )
+    localStorage.setItem('cohost.activeProfileId', studentProfile.id)
+
+    vi.mocked(subscribeAuthUser).mockImplementation((onUser) => {
+      onUser({ uid: ownerId } as never)
+      return vi.fn()
+    })
+    const unsubscribers: ReturnType<typeof vi.fn>[] = []
+    vi.mocked(subscribeEventRequests).mockImplementation(
+      (_ownerId, profileId, profileType, onRequests) => {
+        const stop = vi.fn()
+        unsubscribers.push(stop)
+        onRequests(profileType === 'student' ? [studentRequest] : [organizationRequest])
+        expect(profileId).toBe(
+          profileType === 'student' ? studentProfile.id : organizationProfile.id,
+        )
+        return stop
+      },
+    )
+
+    const view = render(<App />)
+    expect(await screen.findByText('Your request for Student Event is pending.')).toBeTruthy()
+    expect(screen.queryByText('Your request for Organization Event is pending.')).toBeNull()
+
+    fireEvent.change(screen.getByRole('combobox', { name: /active profile/i }), {
+      target: { value: organizationProfile.id },
+    })
+    expect(await screen.findByText('Your request for Organization Event is pending.')).toBeTruthy()
+    expect(screen.queryByText('Your request for Student Event is pending.')).toBeNull()
+    expect(screen.getByRole('heading', { name: /co-hosting requests you sent/i })).toBeTruthy()
+    expect(unsubscribers[0]).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(screen.getByRole('combobox', { name: /active profile/i }), {
+      target: { value: studentProfile.id },
+    })
+    expect(await screen.findByText('Your request for Student Event is pending.')).toBeTruthy()
+    expect(screen.queryByText('Your request for Organization Event is pending.')).toBeNull()
+    expect(unsubscribers[1]).toHaveBeenCalledTimes(1)
+    view.unmount()
+    expect(unsubscribers[2]).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores request status from Firestore-backed subscriptions after remounting', () => {
+    const profile: UserProfile = {
+      id: 'persisted-student',
+      ownerId: 'persisted-owner',
+      name: 'Persisted Student',
+      profileType: 'student',
+      focus: 'Campus activities',
+      location: 'North campus',
+      description: '',
+      createdAt: '2026-10-01T10:00:00.000Z',
+    }
+    const persistedRequest: EventRequest = {
+      id: 'persisted-request',
+      requestType: 'participation',
+      eventId: 'persisted-event',
+      eventTitle: 'Persisted Event',
+      hostOwnerId: 'host-owner',
+      hostProfileId: 'host-profile',
+      requesterOwnerId: profile.ownerId,
+      requesterProfileId: profile.id,
+      requesterName: profile.name,
+      requesterProfileType: 'student',
+      availableDates: ['2027-01-01'],
+      attendeeCount: 1,
+      message: 'Joining.',
+      status: 'accepted',
+      createdAt: '2026-10-02T10:00:00.000Z',
+      resolvedAt: '2026-10-03T10:00:00.000Z',
+    }
+    localStorage.setItem('cohost.userProfiles', JSON.stringify([profile]))
+    localStorage.setItem('cohost.activeProfileId', profile.id)
+    vi.mocked(subscribeAuthUser).mockImplementation((onUser) => {
+      onUser({ uid: profile.ownerId } as never)
+      return vi.fn()
+    })
+    vi.mocked(subscribeEventRequests).mockImplementation(
+      (_ownerId, _profileId, _profileType, onRequests) => {
+        onRequests([persistedRequest])
+        return vi.fn()
+      },
+    )
+
+    const firstView = render(<App />)
+    expect(screen.getByText('Your request for Persisted Event is accepted.')).toBeTruthy()
+    firstView.unmount()
+    render(<App />)
+
+    expect(screen.getByText('Your request for Persisted Event is accepted.')).toBeTruthy()
   })
 
   it('restores a locally saved profile after the app reloads', async () => {

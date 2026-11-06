@@ -1,13 +1,19 @@
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
 import './App.css'
 import {
   continueWithoutEmail,
+  DuplicateEventTitleError,
+  createEventRequestId,
+  deleteEventItem,
+  resolveEventRequest,
   saveUserProfile,
   saveEventItem,
   saveEventRequest,
   subscribeAuthUser,
   subscribeEvents,
+  subscribeEventRequests,
   subscribeUserProfiles,
+  updateEventItem,
 } from './services/cohost'
 import {
   getLocalDeviceId,
@@ -16,7 +22,13 @@ import {
   saveActiveProfileId,
   saveLocalProfiles,
 } from './services/localPersistence'
-import CalendarPicker from './components/CalendarPicker'
+import { OrganizationDashboard } from './components/OrganizationDashboard'
+import { StudentDashboard } from './components/StudentDashboard'
+import type {
+  HostFormValues,
+  ProfileFormValues,
+  RequestDraftValues,
+} from './components/DashboardComponents'
 import type {
   EventAudience,
   EventItem,
@@ -26,7 +38,7 @@ import type {
   UserProfile,
 } from './types'
 
-const emptyProfileForm = {
+const emptyProfileForm: ProfileFormValues = {
   name: '',
   profileType: 'student' as ProfileType,
   focus: 'General club activities',
@@ -34,7 +46,7 @@ const emptyProfileForm = {
   description: '',
 }
 
-const emptyHostForm = {
+const emptyHostForm: HostFormValues = {
   title: '',
   location: '',
   startDate: '',
@@ -44,7 +56,7 @@ const emptyHostForm = {
   audience: 'everyone' as EventAudience,
 }
 
-const emptyDraft = {
+const emptyDraft: RequestDraftValues = {
   dates: [] as string[],
   attendeeCount: '2',
   message: '',
@@ -67,15 +79,6 @@ const getDatesInRange = (startDate: string, endDate: string) => {
   }
 
   return dates
-}
-
-const formatDateLabel = (date: string) => {
-  const [year, month, day] = date.split('-').map(Number)
-  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
 }
 
 const loadInitialProfileState = () => {
@@ -103,23 +106,27 @@ const App = () => {
     initialProfileState.activeProfile,
   )
   const [events, setEvents] = useState<EventItem[]>([])
-  const [inbox, setInbox] = useState<InboxNotice[]>([])
+  const [eventRequests, setEventRequests] = useState<EventRequest[]>([])
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
   const [authUserId, setAuthUserId] = useState<string | null>(null)
   const [profileForm, setProfileForm] = useState(emptyProfileForm)
   const [hostForm, setHostForm] = useState(emptyHostForm)
-  const [requestDrafts, setRequestDrafts] = useState<Record<string, typeof emptyDraft>>({})
+  const [requestDrafts, setRequestDrafts] = useState<Record<string, RequestDraftValues>>({})
   const [statusMessage, setStatusMessage] = useState('Create a profile to get started.')
   const [errorMessage, setErrorMessage] = useState<string | null>(initialProfileState.error)
   const [eventFormFeedback, setEventFormFeedback] = useState<{
     type: 'success' | 'error'
     message: string
   } | null>(null)
+  const [isPublishing, setIsPublishing] = useState(false)
+  const publishingRef = useRef(false)
+  const eventFeedbackRef = useRef<HTMLParagraphElement>(null)
 
-  const totalOpenSpots = useMemo(
-    () => events.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0),
-    [events],
-  )
-  const canHostEvents = activeProfile?.profileType === 'organization'
+  useEffect(() => {
+    if (eventFormFeedback?.type === 'success') {
+      eventFeedbackRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    }
+  }, [eventFormFeedback])
 
   useEffect(
     () =>
@@ -127,6 +134,7 @@ const App = () => {
         (user) => {
           const nextUserId = user?.uid ?? null
           setAuthUserId(nextUserId)
+          if (!nextUserId) setEventRequests([])
         },
         (error) => setErrorMessage(`Could not restore your local account: ${error.message}`),
       ),
@@ -143,13 +151,27 @@ const App = () => {
   )
 
   useEffect(() => {
+    if (!authUserId || !activeProfile || activeProfile.ownerId !== authUserId) return
+
+    return subscribeEventRequests(
+      authUserId,
+      activeProfile.id,
+      activeProfile.profileType,
+      setEventRequests,
+      (error) => setErrorMessage(`Could not load event requests: ${error.message}`),
+    )
+  }, [authUserId, activeProfile])
+
+  useEffect(() => {
     if (!authUserId) return
 
     return subscribeUserProfiles(
       authUserId,
       (savedProfiles) => {
         try {
-          const localProfiles = loadLocalProfiles()
+          const localProfiles = loadLocalProfiles().filter(
+            (localProfile) => localProfile.ownerId === authUserId,
+          )
           const mergedProfiles = [
             ...savedProfiles,
             ...localProfiles.filter(
@@ -224,7 +246,10 @@ const App = () => {
     try {
       const user = await continueWithoutEmail()
       setAuthUserId(user.uid)
-      const localProfiles = loadLocalProfiles()
+      const deviceId = getLocalDeviceId()
+      const localProfiles = loadLocalProfiles().filter(
+        (profile) => profile.ownerId === user.uid || profile.ownerId === deviceId,
+      )
       const syncedProfiles = localProfiles.map((profile) => ({ ...profile, ownerId: user.uid }))
       saveLocalProfiles(syncedProfiles)
       setProfiles(syncedProfiles)
@@ -323,6 +348,7 @@ const App = () => {
 
   const handleHostEvent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (publishingRef.current) return
 
     if (!authUserId || !activeProfile || activeProfile.profileType !== 'organization') {
       setEventFormFeedback({
@@ -347,43 +373,90 @@ const App = () => {
       return
     }
 
-    const nextEvent: EventItem = {
-      id: crypto.randomUUID(),
-      hostId: activeProfile.id,
-      hostOwnerId: authUserId,
-      hostName: activeProfile.name,
-      hostProfileType: activeProfile.profileType,
-      title,
-      location,
-      description: hostForm.description.trim() || 'Looking for a co-hosting partner.',
-      audience: hostForm.audience,
-      dateOptions,
-      capacity: Number(hostForm.capacity) || 12,
-      attendees: 0,
-      createdAt: new Date().toISOString(),
-    }
+    publishingRef.current = true
+    setIsPublishing(true)
+    setEventFormFeedback(null)
 
     try {
+      const nextEvent: EventItem = {
+        id: crypto.randomUUID(),
+        hostId: activeProfile.id,
+        hostOwnerId: authUserId,
+        hostName: activeProfile.name,
+        hostProfileType: activeProfile.profileType,
+        title,
+        location,
+        description: hostForm.description.trim() || 'Looking for a co-hosting partner.',
+        audience: hostForm.audience,
+        dateOptions,
+        capacity: Number(hostForm.capacity) || 12,
+        attendees: 0,
+        createdAt: new Date().toISOString(),
+      }
+
       await saveEventItem(nextEvent)
       setEvents((current) => [nextEvent, ...current.filter((item) => item.id !== nextEvent.id)])
       setHostForm(emptyHostForm)
       setEventFormFeedback({
         type: 'success',
-        message: `${nextEvent.title} was posted to the event board.`,
+        message: `Event '${nextEvent.title}' has been published successfully!`,
       })
     } catch (error) {
       setEventFormFeedback({
         type: 'error',
-        message: `Could not save the event: ${
-          error instanceof Error ? error.message : 'unknown Firebase error'
-        }`,
+        message:
+          error instanceof DuplicateEventTitleError
+            ? error.message
+            : `Could not save the event: ${
+                error instanceof Error ? error.message : 'unknown Firebase error'
+              }`,
       })
+    } finally {
+      publishingRef.current = false
+      setIsPublishing(false)
     }
   }
 
-  const handleJoinRequest = async (eventItem: EventItem) => {
-    if (!activeProfile) {
+  const handleUpdateEvent = async (event: EventItem) => {
+    if (!authUserId || activeProfile?.profileType !== 'organization') {
+      throw new Error('An organization profile is required to manage events.')
+    }
+    if (event.hostOwnerId !== authUserId || event.hostId !== activeProfile.id) {
+      throw new Error('Only the account that published this event can edit it.')
+    }
+
+    const updatedEvent = await updateEventItem(event)
+    setEvents((current) =>
+      current.map((item) => (item.id === updatedEvent.id ? updatedEvent : item)),
+    )
+  }
+
+  const handleDeleteEvent = async (event: EventItem) => {
+    if (!authUserId || activeProfile?.profileType !== 'organization') {
+      throw new Error('An organization profile is required to manage events.')
+    }
+    if (event.hostOwnerId !== authUserId || event.hostId !== activeProfile.id) {
+      throw new Error('Only the account that published this event can delete it.')
+    }
+
+    await deleteEventItem(event)
+    setEvents((current) => current.filter((item) => item.id !== event.id))
+  }
+
+  const handleJoinRequest = async (
+    eventItem: EventItem,
+    requestKind: 'participation' | 'cohost',
+  ) => {
+    if (!activeProfile || !authUserId || activeProfile.ownerId !== authUserId) {
       setErrorMessage('Create a profile before requesting to join an event.')
+      return
+    }
+
+    if (
+      (requestKind === 'participation' && activeProfile.profileType !== 'student') ||
+      (requestKind === 'cohost' && activeProfile.profileType !== 'organization')
+    ) {
+      setErrorMessage('Switch to the matching profile type to submit this request.')
       return
     }
 
@@ -404,95 +477,165 @@ const App = () => {
     const selectedDates = draft.dates.length > 0 ? draft.dates : eventItem.dateOptions.slice(0, 1)
     const attendeeCount =
       activeProfile.profileType === 'student' ? 1 : Number(draft.attendeeCount) || 1
-    const openSpots = eventItem.capacity - eventItem.attendees
-
     if (selectedDates.length === 0) {
       setErrorMessage('Choose at least one date before sending your request.')
       return
     }
 
-    if (attendeeCount > openSpots) {
+    const openSpots = eventItem.capacity - eventItem.attendees
+    if (requestKind === 'participation' && attendeeCount > openSpots) {
       setErrorMessage(`Only ${openSpots} spots remain for this event.`)
       return
     }
 
+    const requestId = createEventRequestId(
+      eventItem.id,
+      activeProfile.ownerId,
+      activeProfile.id,
+      requestKind,
+    )
+    if (eventRequests.some((request) => request.id === requestId)) {
+      setErrorMessage('A request for this event has already been sent from this profile.')
+      return
+    }
+
     const newRequest: EventRequest = {
-      id: crypto.randomUUID(),
+      id: requestId,
+      requestType: requestKind,
       eventId: eventItem.id,
+      eventTitle: eventItem.title,
+      hostOwnerId: eventItem.hostOwnerId,
+      hostProfileId: eventItem.hostId,
       requesterOwnerId: activeProfile.ownerId,
       requesterProfileId: activeProfile.id,
       requesterName: activeProfile.name,
       requesterProfileType: activeProfile.profileType,
       availableDates: selectedDates,
       attendeeCount,
-      message: draft.message.trim() || 'Interested in co-hosting this event.',
+      message:
+        requestKind === 'cohost'
+          ? `Co-hosting request: ${draft.message.trim() || 'Interested in collaborating on this event.'}`
+          : draft.message.trim() || 'Interested in joining this event.',
       status: 'pending',
       createdAt: new Date().toISOString(),
     }
 
-    setEvents((current) =>
-      current.map((item) =>
-        item.id === eventItem.id
-          ? {
-              ...item,
-              attendees: Math.min(item.capacity, item.attendees + attendeeCount),
-            }
-          : item,
-      ),
-    )
-
-    setInbox((current) => [
-      {
-        id: crypto.randomUUID(),
-        title: `Request sent to ${eventItem.hostName}`,
-        message: `${activeProfile.name} (${activeProfile.profileType}) requested ${attendeeCount} ${
-          attendeeCount === 1 ? 'spot' : 'spots'
-        } on ${selectedDates.join(', ')}.`,
-        type: 'outgoing',
-        relatedEventId: eventItem.id,
-        createdAt: new Date().toISOString(),
-        isRead: false,
-      },
-      {
-        id: crypto.randomUUID(),
-        title: `New request for ${eventItem.title}`,
-        message: `${activeProfile.name} (${activeProfile.profileType}) wants to join on ${selectedDates.join(', ')} with ${attendeeCount} ${
-          attendeeCount === 1 ? 'person' : 'people'
-        }.`,
-        type: 'incoming',
-        relatedEventId: eventItem.id,
-        createdAt: new Date().toISOString(),
-        isRead: false,
-      },
-      ...current,
-    ])
-
-    setRequestDrafts((current) => ({
-      ...current,
-      [eventItem.id]: { ...emptyDraft },
-    }))
-    setStatusMessage(`Your request for ${eventItem.title} has been sent.`)
-    setErrorMessage(null)
-
     try {
       await saveEventRequest(newRequest)
-    } catch {
-      setErrorMessage('Request saved in the inbox locally, but Firebase write was unavailable.')
+      setRequestDrafts((current) => ({
+        ...current,
+        [eventItem.id]: { ...emptyDraft },
+      }))
+      setStatusMessage(
+        requestKind === 'cohost'
+          ? `Your co-hosting request for ${eventItem.title} has been sent.`
+          : `Your participation request for ${eventItem.title} has been sent.`,
+      )
+      setErrorMessage(null)
+    } catch (error) {
+      setErrorMessage(
+        `Could not send your request: ${
+          error instanceof Error ? error.message : 'unknown Firebase error'
+        }`,
+      )
     }
   }
 
   const markNotificationRead = (noticeId: string) => {
-    setInbox((current) =>
-      current.map((notice) =>
-        notice.id === noticeId
-          ? {
-              ...notice,
-              isRead: true,
-            }
-          : notice,
-      ),
+    setReadNotificationIds((current) =>
+      current.indexOf(noticeId) !== -1 ? current : [...current, noticeId],
     )
   }
+
+  const handleResolveRequest = async (
+    eventRequest: EventRequest,
+    status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
+  ) => {
+    if (!authUserId || activeProfile?.ownerId !== authUserId) {
+      setErrorMessage('Sign in to the event host account before responding to requests.')
+      return
+    }
+    if (
+      activeProfile.profileType !== 'organization' ||
+      eventRequest.hostOwnerId !== authUserId ||
+      eventRequest.hostProfileId !== activeProfile.id
+    ) {
+      setErrorMessage('You are not authorized to respond to this request.')
+      return
+    }
+
+    try {
+      await resolveEventRequest(eventRequest, status, authUserId, activeProfile.id)
+      setStatusMessage(
+        `The ${eventRequest.requestType === 'cohost' ? 'co-hosting' : 'participation'} request was ${status}.`,
+      )
+      setErrorMessage(null)
+    } catch (error) {
+      setErrorMessage(
+        `Could not ${status === 'accepted' ? 'accept' : 'decline'} the request: ${
+          error instanceof Error ? error.message : 'unknown Firebase error'
+        }`,
+      )
+    }
+  }
+
+  const handleSelectProfile = (profileId: string) => {
+    const selectedProfile = profiles.find((profile) => profile.id === profileId)
+    if (!selectedProfile) return
+    saveActiveProfileId(selectedProfile.id)
+    setActiveProfile(selectedProfile)
+  }
+
+  const activeProfileRequests = activeProfile?.ownerId === authUserId
+    ? eventRequests.filter((request) => {
+        const isOutgoing =
+          request.requesterOwnerId === authUserId &&
+          request.requesterProfileId === activeProfile.id &&
+          (activeProfile.profileType === 'student'
+            ? request.requestType === 'participation'
+            : request.requestType === 'cohost')
+        const isIncoming =
+          activeProfile.profileType === 'organization' &&
+          request.hostOwnerId === authUserId &&
+          request.hostProfileId === activeProfile.id
+        return isOutgoing !== isIncoming
+      })
+    : []
+
+  const inbox: InboxNotice[] = activeProfileRequests.map((request) => {
+    const isOutgoing =
+      request.requesterOwnerId === authUserId &&
+      request.requesterProfileId === activeProfile?.id
+    const requestLabel = request.requestType === 'cohost' ? 'Co-hosting' : 'Participation'
+    const statusLabel = request.status[0].toUpperCase() + request.status.slice(1)
+    return {
+      id: request.id,
+      profileId: activeProfile?.id ?? '',
+      title: isOutgoing
+        ? `${requestLabel} request ${statusLabel.toLowerCase()}`
+        : request.status === 'pending'
+          ? `New ${requestLabel.toLowerCase()} request for ${request.eventTitle}`
+          : `${requestLabel} request ${statusLabel.toLowerCase()} for ${request.eventTitle}`,
+      message: isOutgoing
+        ? `Your request for ${request.eventTitle} is ${request.status}.`
+        : `${request.requesterName} requested ${request.attendeeCount} ${
+            request.attendeeCount === 1 ? 'spot' : 'spots'
+          } for ${request.eventTitle}.`,
+      type: isOutgoing ? 'outgoing' : 'incoming',
+      relatedEventId: request.eventId,
+      createdAt: request.createdAt,
+      isRead: readNotificationIds.indexOf(request.id) !== -1,
+    }
+  })
+
+  const handleRequestDatesChange = (eventId: string, dates: string[]) => {
+    setRequestDrafts((current) => ({
+      ...current,
+      [eventId]: { ...(current[eventId] ?? { ...emptyDraft }), dates },
+    }))
+  }
+
+  const totalOpenSpots = events.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0)
 
   return (
     <div className="app-shell">
@@ -500,7 +643,7 @@ const App = () => {
       <header className="site-header">
         <div className="header-inner">
           <a href="#" className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
-          <nav aria-label="Main navigation"><a href="#events">Find an event</a><a href="#host">Host an event</a></nav>
+          <nav aria-label="Main navigation"><a href="#events">Find an event</a><a href={activeProfile?.profileType === 'organization' ? '#host' : '#profile'}>Host an event</a></nav>
           <button type="button" onClick={handleContinueWithoutEmail} className="button-secondary account-button">{authUserId ? 'Account saved on this device' : 'Continue without email'}</button>
         </div>
       </header>
@@ -524,474 +667,63 @@ const App = () => {
             {statusMessage}
           </div>
         ) : null}
-
         {errorMessage ? (
-          <div role="alert" className="error-note">
+          <div
+            role="alert"
+            className="error-note"
+          >
             {errorMessage}
           </div>
         ) : null}
-
-        <section className="workspace">
-          <div className="space-y-6">
-            <section id="events" className="panel event-board">
-              <div className="mb-6 flex items-center justify-between gap-3">
-                <div>
-                  <p className="eyebrow text-stone-600">Event board</p>
-                  <h2 className="mt-2 text-2xl font-bold text-stone-900">Events</h2>
-                </div>
-                <span className="border border-stone-300 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
-                  {events.length} {events.length === 1 ? 'event' : 'events'}
-                </span>
-              </div>
-
-              <div className="grid gap-6">
-                {events.length === 0 ? (
-                  <p className="empty-state">
-                    No events have been posted yet.
-                  </p>
-                ) : null}
-                {events.map((event) => {
-                  const draft = requestDrafts[event.id] ?? { ...emptyDraft }
-
-                  return (
-                    <article key={event.id} className="event-card">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.2em] text-orange-800">
-                            Hosted by {event.hostName} · {event.hostProfileType}
-                          </p>
-                          <h3 className="mt-2 text-2xl font-bold text-stone-900">{event.title}</h3>
-                        </div>
-                        <span className="border border-emerald-800/20 bg-emerald-800/5 px-3 py-1 text-xs font-semibold text-emerald-800">
-                          {Math.max(event.capacity - event.attendees, 0)} open
-                        </span>
-                      </div>
-
-                      <p className="mt-4 text-sm text-stone-600">{event.description}</p>
-
-                      <dl className="mt-4 space-y-2 text-sm text-stone-600">
-                        <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                          <dt>Location</dt>
-                          <dd>{event.location}</dd>
-                        </div>
-                        <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                          <dt>Capacity</dt>
-                          <dd>{event.capacity} total</dd>
-                        </div>
-                        <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                          <dt>Attendees</dt>
-                          <dd>{event.attendees}</dd>
-                        </div>
-                        <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                          <dt>Open to</dt>
-                          <dd>{event.audience === 'everyone' ? 'Students and organizations' : 'Organizations only'}</dd>
-                        </div>
-                      </dl>
-
-                      <p className="mt-4 text-sm text-stone-600">
-                        Dates: {formatDateLabel(event.dateOptions[0])} –{' '}
-                        {formatDateLabel(event.dateOptions[event.dateOptions.length - 1])}
-                      </p>
-
-                      {activeProfile &&
-                      (event.hostId === activeProfile.id ||
-                        event.hostOwnerId === activeProfile.ownerId) ? (
-                        <p className="mt-5 border-t border-stone-200 pt-5 text-sm text-stone-600">
-                          You are hosting this event and cannot request to join it.
-                        </p>
-                      ) : event.audience === 'organizations' &&
-                        activeProfile?.profileType === 'student' ? (
-                        <p className="mt-5 border-t border-stone-200 pt-5 text-sm text-amber-800">
-                          This event is open to organizations only. Switch to an organization profile to request a spot.
-                        </p>
-                      ) : !activeProfile ? (
-                        <p className="join-prompt"><a href="#profile" className="text-link">Create a profile to join</a></p>
-                      ) : (
-                        <form
-                          className="form-stack request-fields"
-                          onSubmit={(submitEvent) => {
-                            submitEvent.preventDefault()
-                            void handleJoinRequest(event)
-                          }}
-                        >
-                          <p className="text-sm text-stone-600">
-                            Requesting as{' '}
-                            <span className="font-semibold capitalize text-orange-800">
-                              {activeProfile?.profileType}
-                            </span>{' '}
-                            · {activeProfile?.name}
-                          </p>
-                          <fieldset>
-                            <legend className="mb-2 text-sm font-medium text-stone-700">
-                              Your availability
-                            </legend>
-                            <CalendarPicker
-                              key={`${event.id}-${event.dateOptions[0]}`}
-                              mode="availability"
-                              availableDates={event.dateOptions}
-                              selectedDates={draft.dates}
-                              onDatesChange={(dates) =>
-                                setRequestDrafts((current) => ({
-                                  ...current,
-                                  [event.id]: {
-                                    ...(current[event.id] ?? { ...emptyDraft }),
-                                    dates,
-                                  },
-                                }))
-                              }
-                            />
-                          </fieldset>
-
-                          {activeProfile?.profileType === 'organization' ? (
-                            <div className="grid gap-4 md:grid-cols-[130px_1fr]">
-                              <label className="form-field">
-                                <span>People attending</span>
-                                <input
-                                  aria-label={`Participant count for ${event.title}`}
-                                  type="number"
-                                  min="1"
-                                  max={Math.max(event.capacity - event.attendees, 1)}
-                                  value={draft.attendeeCount}
-                                  onChange={(inputEvent) =>
-                                    handleRequestDraftChange(
-                                      event.id,
-                                      'attendeeCount',
-                                      inputEvent.target.value,
-                                    )
-                                  }
-                                  className="input"
-                                />
-                              </label>
-                            </div>
-                          ) : (
-                            <p className="text-sm text-stone-600">Your request is for one student.</p>
-                          )}
-
-                          <label className="form-field">
-                            <span>Message</span>
-                            <textarea
-                              aria-label={`Message for ${event.title}`}
-                              value={draft.message}
-                              onChange={(inputEvent) =>
-                                handleRequestDraftChange(event.id, 'message', inputEvent.target.value)
-                              }
-                              className="input"
-                              placeholder="Add a note for the host."
-                            />
-                          </label>
-
-                          <button
-                            type="submit"
-                            disabled={event.capacity <= event.attendees}
-                            className="button-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {event.capacity <= event.attendees ? 'Event full' : 'Send request'}
-                          </button>
-                        </form>
-                      )}
-                    </article>
-                  )
-                })}
-              </div>
-            </section>
-
-            <div id="host" className="panel host-panel">
-              <h2 className="text-2xl font-bold text-stone-900">Host an event</h2>
-              {!canHostEvents ? (
-                <p className="mt-2 text-sm text-stone-600">
-                  {activeProfile
-                    ? 'Only student organizations can post events. Switch to an organization profile to host one.'
-                    : 'Create a student organization profile to post an event.'}
-                </p>
-              ) : null}
-
-              <form className="form-stack" onSubmit={handleHostEvent}>
-                <fieldset
-                  disabled={!canHostEvents}
-                  className="form-stack host-fields"
-                >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="form-field">
-                    <span>Event title</span>
-                    <input
-                      aria-label="Event title"
-                      name="title"
-                      value={hostForm.title}
-                      onChange={handleHostFieldChange}
-                      className="input"
-                      placeholder="Campus wellness fair"
-                    />
-                  </label>
-
-                  <label className="form-field">
-                    <span>Location</span>
-                    <input
-                      aria-label="Event location"
-                      name="location"
-                      value={hostForm.location}
-                      onChange={handleHostFieldChange}
-                      className="input"
-                      placeholder="Student activity center"
-                    />
-                  </label>
-                </div>
-
-                <div>
-                  <label className="form-field">
-                    <span>Capacity</span>
-                    <input
-                      aria-label="Event capacity"
-                      name="capacity"
-                      type="number"
-                      min="1"
-                      value={hostForm.capacity}
-                      onChange={handleHostFieldChange}
-                      className="input"
-                    />
-                  </label>
-                </div>
-
-                <fieldset>
-                  <legend className="mb-2 text-sm text-stone-700">Event dates</legend>
-                  <CalendarPicker
-                    mode="range"
-                    startDate={hostForm.startDate}
-                    endDate={hostForm.endDate}
-                    onRangeChange={(startDate, endDate) => {
-                      setEventFormFeedback(null)
-                      setHostForm((current) => ({ ...current, startDate, endDate }))
-                    }}
-                  />
-                </fieldset>
-
-                <label className="form-field">
-                  <span>Who can join?</span>
-                  <select
-                    aria-label="Event audience"
-                    name="audience"
-                    value={hostForm.audience}
-                    onChange={handleHostFieldChange}
-                    className="input"
-                  >
-                    <option value="everyone">Students and organizations</option>
-                    <option value="organizations">Organizations only</option>
-                  </select>
-                </label>
-
-                <label className="form-field">
-                  <span>Short description</span>
-                  <textarea
-                    aria-label="Event description"
-                    name="description"
-                    value={hostForm.description}
-                    onChange={handleHostFieldChange}
-                    className="input"
-                    placeholder="What is the event about?"
-                  />
-                </label>
-
-                <button type="submit" className="button-primary disabled:cursor-not-allowed">
-                  Post event
-                </button>
-                {eventFormFeedback ? (
-                  <p
-                    role={eventFormFeedback.type === 'error' ? 'alert' : 'status'}
-                    className={
-                      eventFormFeedback.type === 'error'
-                        ? 'text-sm text-red-800'
-                        : 'text-sm text-emerald-800'
-                    }
-                  >
-                    {eventFormFeedback.message}
-                  </p>
-                ) : null}
-                </fieldset>
-              </form>
-            </div>
-          </div>
-
-          <aside id="profile" className="profile-sidebar space-y-6">
-            <div className="panel">
-              <p className="eyebrow text-stone-600">Active profile</p>
-              {activeProfile ? (
-                <>
-                  {profiles.length > 1 ? (
-                    <label className="form-field mt-3">
-                      <span>Use CoHost as</span>
-                      <select
-                        aria-label="Active profile"
-                        value={activeProfile.id}
-                        onChange={(event) => {
-                          const selectedProfile = profiles.find(
-                            (profile) => profile.id === event.target.value,
-                          )
-                          if (selectedProfile) {
-                            saveActiveProfileId(selectedProfile.id)
-                            setActiveProfile(selectedProfile)
-                          }
-                        }}
-                        className="input"
-                      >
-                        {profiles.map((profile) => (
-                          <option key={profile.id} value={profile.id}>
-                            {profile.name} — {profile.profileType}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <h2 className="mt-4 text-2xl font-bold text-stone-900">{activeProfile.name}</h2>
-                  <p className="mt-2 inline-flex border border-orange-800/25 bg-orange-800/5 px-3 py-1 text-xs font-semibold capitalize text-orange-800">
-                    {activeProfile.profileType}
-                  </p>
-                  <p className="mt-3 text-sm text-stone-600">{activeProfile.focus}</p>
-                  <dl className="mt-4 space-y-2 text-sm text-stone-600">
-                    <div className="flex items-center justify-between gap-3 border-b border-stone-200 pb-2">
-                      <dt>Location</dt>
-                      <dd>{activeProfile.location}</dd>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 border-b border-stone-200 pb-2">
-                      <dt>Profile status</dt>
-                      <dd>{authUserId ? 'Saved on this device' : 'Guest mode'}</dd>
-                    </div>
-                  </dl>
-                  <p className="mt-4 text-sm text-stone-600">{activeProfile.description}</p>
-                </>
-              ) : (
-                <p className="mt-3 text-sm text-stone-600">
-                  Create a profile below to join events.
-                </p>
-              )}
-            </div>
-
-            <div className="panel">
-              <h2 className="text-2xl font-bold text-stone-900">Create a profile</h2>
-              <p className="mt-2 text-sm text-stone-600">
-                Your profile tells hosts who is joining.
-              </p>
-
-              <form className="form-stack" onSubmit={handleCreateProfile}>
-                <label className="form-field">
-                  <span>I am a</span>
-                  <select
-                    aria-label="Profile type"
-                    name="profileType"
-                    value={profileForm.profileType}
-                    onChange={handleProfileFieldChange}
-                    className="input"
-                  >
-                    <option value="student">Student</option>
-                    <option value="organization">Organization or club</option>
-                  </select>
-                </label>
-
-                <label className="form-field">
-                  <span>{profileForm.profileType === 'student' ? 'Your name' : 'Organization name'}</span>
-                  <input
-                    aria-label={profileForm.profileType === 'student' ? 'Your name' : 'Organization name'}
-                    name="name"
-                    value={profileForm.name}
-                    onChange={handleProfileFieldChange}
-                    className="input"
-                    placeholder={profileForm.profileType === 'student' ? 'Alex Morgan' : 'Northwind Club'}
-                  />
-                </label>
-
-                <label className="form-field">
-                  <span>Area of interest</span>
-                  <select
-                    aria-label="Area of interest"
-                    name="focus"
-                    value={profileForm.focus}
-                    onChange={handleProfileFieldChange}
-                    className="input"
-                  >
-                    <option>General club activities</option>
-                    <option>Martial arts and team events</option>
-                    <option>Outdoor and recreation</option>
-                    <option>STEM and maker projects</option>
-                    <option>Arts and cultural programming</option>
-                  </select>
-                </label>
-
-                <label className="form-field">
-                  <span>Location</span>
-                  <input
-                    aria-label="Profile location"
-                    name="location"
-                    value={profileForm.location}
-                    onChange={handleProfileFieldChange}
-                    className="input"
-                    placeholder="North campus"
-                  />
-                </label>
-
-                <label className="form-field">
-                  <span>About you</span>
-                  <textarea
-                    aria-label="Profile description"
-                    name="description"
-                    value={profileForm.description}
-                    onChange={handleProfileFieldChange}
-                    className="input"
-                    placeholder="What are you interested in?"
-                  />
-                </label>
-
-                <button type="submit" className="button-primary">
-                  Save profile
-                </button>
-              </form>
-            </div>
-
-            <div className="panel">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-2xl font-bold text-stone-900">Inbox</h2>
-                <span className="border border-stone-300 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-600">
-                  {inbox.filter((entry) => !entry.isRead).length} new
-                </span>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {inbox.length === 0 ? (
-                  <p className="text-sm text-stone-600">Your inbox is empty.</p>
-                ) : (
-                  inbox.map((notice) => (
-                    <article
-                      key={notice.id}
-                      className={`border p-4 ${
-                        notice.isRead ? 'border-stone-200 bg-stone-50' : 'border-orange-800/25 bg-stone-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <p className="text-sm font-semibold text-stone-900">{notice.title}</p>
-                        <span className="border border-stone-300 px-2 py-0.5 text-[10px] uppercase tracking-wide text-stone-600">
-                          {notice.type}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-stone-600">{notice.message}</p>
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <span className="text-[11px] uppercase tracking-wide text-stone-500">
-                          {new Date(notice.createdAt).toLocaleDateString()}
-                        </span>
-                        {!notice.isRead ? (
-                          <button
-                            type="button"
-                            onClick={() => markNotificationRead(notice.id)}
-                            className="text-xs font-medium text-orange-800 hover:text-orange-800"
-                          >
-                            Mark read
-                          </button>
-                        ) : null}
-                      </div>
-                    </article>
-                  ))
-                )}
-              </div>
-            </div>
-          </aside>
-        </section>
-
+        {activeProfile?.profileType === 'organization' ? (
+          <OrganizationDashboard
+            activeProfile={activeProfile}
+            profiles={profiles}
+            authUserId={authUserId}
+            events={events}
+            inbox={inbox}
+            collaborationRequests={activeProfileRequests}
+            profileForm={profileForm}
+            hostForm={hostForm}
+            requestDrafts={requestDrafts}
+            eventFormFeedback={eventFormFeedback}
+            eventFeedbackRef={eventFeedbackRef}
+            isPublishing={isPublishing}
+            onSelectProfile={handleSelectProfile}
+            onCreateProfile={handleCreateProfile}
+            onProfileFieldChange={handleProfileFieldChange}
+            onHostFieldChange={handleHostFieldChange}
+            onHostRangeChange={(startDate, endDate) => {
+              setEventFormFeedback(null)
+              setHostForm((current) => ({ ...current, startDate, endDate }))
+            }}
+            onHostEvent={handleHostEvent}
+            onUpdateEvent={handleUpdateEvent}
+            onDeleteEvent={handleDeleteEvent}
+            onDraftChange={handleRequestDraftChange}
+            onDatesChange={handleRequestDatesChange}
+            onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
+            onResolveRequest={(request, status) => handleResolveRequest(request, status)}
+            onMarkRead={markNotificationRead}
+          />
+        ) : (
+          <StudentDashboard
+            activeProfile={activeProfile}
+            profiles={profiles}
+            authUserId={authUserId}
+            events={events}
+            inbox={inbox}
+            profileForm={profileForm}
+            requestDrafts={requestDrafts}
+            onSelectProfile={handleSelectProfile}
+            onCreateProfile={handleCreateProfile}
+            onProfileFieldChange={handleProfileFieldChange}
+            onDraftChange={handleRequestDraftChange}
+            onDatesChange={handleRequestDatesChange}
+            onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
+            onMarkRead={markNotificationRead}
+          />
+        )}
         <footer className="site-footer"><span>CoHost</span><a href="#">Back to top</a></footer>
       </main>
     </div>
