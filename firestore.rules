@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(ownerId) {
+      return signedIn() && request.auth.uid == ownerId;
+    }
+
+    match /userProfiles/{profileId} {
+      allow create: if owns(request.resource.data.ownerId);
+      allow read, delete: if owns(resource.data.ownerId);
+      allow update: if owns(resource.data.ownerId)
+        && request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if owns(request.resource.data.hostOwnerId)
+        && request.resource.data.hostProfileType == 'organization';
+      allow update: if owns(resource.data.hostOwnerId)
+        && request.resource.data.hostOwnerId == resource.data.hostOwnerId;
+      allow delete: if owns(resource.data.hostOwnerId);
+    }
+
+    match /eventRequests/{requestId} {
+      function isEventHost() {
+        return signedIn()
+          && get(/databases/$(database)/documents/events/$(resource.data.eventId))
+            .data.hostOwnerId == request.auth.uid;
+      }
+
+      allow create: if owns(request.resource.data.requesterOwnerId);
+      allow read: if owns(resource.data.requesterOwnerId) || isEventHost();
+      allow update: if isEventHost()
+        && request.resource.data.requesterOwnerId == resource.data.requesterOwnerId
+        && request.resource.data.eventId == resource.data.eventId;
+      allow delete: if owns(resource.data.requesterOwnerId) || isEventHost();
+    }
+  }
+}
