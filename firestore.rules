@@ -20,10 +20,47 @@ service cloud.firestore {
     match /events/{eventId} {
       allow read: if true;
       allow create: if owns(request.resource.data.hostOwnerId)
-        && request.resource.data.hostProfileType == 'organization';
+        && request.resource.data.hostProfileType == 'organization'
+        && request.resource.data.titleReservationId is string
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.eventId == eventId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostId == request.resource.data.hostId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostOwnerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.title == request.resource.data.title;
       allow update: if owns(resource.data.hostOwnerId)
-        && request.resource.data.hostOwnerId == resource.data.hostOwnerId;
-      allow delete: if owns(resource.data.hostOwnerId);
+        && request.resource.data.hostOwnerId == resource.data.hostOwnerId
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.hostProfileType == resource.data.hostProfileType
+        && request.resource.data.titleReservationId is string
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.eventId == eventId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostId == resource.data.hostId
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostOwnerId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.title == request.resource.data.title
+        && (!('titleReservationId' in resource.data)
+          || resource.data.titleReservationId == request.resource.data.titleReservationId
+          || !existsAfter(/databases/$(database)/documents/eventTitleReservations/$(resource.data.titleReservationId)));
+      allow delete: if owns(resource.data.hostOwnerId)
+        && (!('titleReservationId' in resource.data)
+          || !existsAfter(/databases/$(database)/documents/eventTitleReservations/$(resource.data.titleReservationId)));
+    }
+
+    match /eventTitleReservations/{reservationId} {
+      function matchingEvent() {
+        return getAfter(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data;
+      }
+
+      allow read: if signedIn();
+      allow create: if owns(request.resource.data.hostOwnerId)
+        && matchingEvent().titleReservationId == reservationId
+        && matchingEvent().hostId == request.resource.data.hostId
+        && matchingEvent().hostOwnerId == request.auth.uid
+        && matchingEvent().title == request.resource.data.title;
+      allow update: if false;
+      allow delete: if signedIn()
+        && exists(/databases/$(database)/documents/events/$(resource.data.eventId))
+        && owns(get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.hostOwnerId)
+        && get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.titleReservationId == reservationId
+        && (!existsAfter(/databases/$(database)/documents/events/$(resource.data.eventId))
+          || getAfter(/databases/$(database)/documents/events/$(resource.data.eventId)).data.titleReservationId != reservationId);
     }
 
     match /eventRequests/{requestId} {

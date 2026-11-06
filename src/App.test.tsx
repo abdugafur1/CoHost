@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import {
   continueWithoutEmail,
+  DuplicateEventTitleError,
   saveEventItem,
   saveEventRequest,
   saveUserProfile,
@@ -12,6 +13,11 @@ import type { EventItem } from './types'
 
 vi.mock('./services/cohost', () => ({
   continueWithoutEmail: vi.fn(),
+  DuplicateEventTitleError: class DuplicateEventTitleError extends Error {
+    constructor() {
+      super('An event with this title already exists. Please choose a different title.')
+    }
+  },
   saveUserProfile: vi.fn(),
   saveEventItem: vi.fn(),
   saveEventRequest: vi.fn(),
@@ -42,10 +48,12 @@ describe('CoHost app', () => {
     expect(await screen.findByText(/your device account is ready/i)).toBeTruthy()
   })
 
-  it('allows organizations to post events while students can only request to join', async () => {
+  it('shows separate student and organization dashboards as profiles change', async () => {
     vi.mocked(continueWithoutEmail).mockResolvedValue({ uid: 'user-123' } as never)
     vi.mocked(saveUserProfile).mockResolvedValue(undefined)
-    vi.mocked(saveEventItem).mockResolvedValue(undefined)
+    vi.mocked(saveEventItem)
+      .mockRejectedValueOnce(new DuplicateEventTitleError())
+      .mockRejectedValueOnce(new Error('network unavailable'))
     vi.mocked(saveEventRequest).mockResolvedValue(undefined)
 
     render(<App />)
@@ -69,10 +77,9 @@ describe('CoHost app', () => {
         profileType: 'student',
       }),
     )
-    expect(screen.getByText(/only student organizations can post events/i)).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /post event/i }).closest('fieldset')?.hasAttribute('disabled'),
-    ).toBe(true)
+    expect(screen.getByText(/student dashboard/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /post event/i })).toBeNull()
+    expect(screen.getByText(/no events have been posted yet/i)).toBeTruthy()
 
     fireEvent.change(screen.getByRole('combobox', { name: /profile type/i }), {
       target: { value: 'organization' },
@@ -86,9 +93,13 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('button', { name: /save profile/i }))
 
     expect(await screen.findByRole('heading', { name: /campus volunteers/i })).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: /post event/i }).closest('fieldset')?.hasAttribute('disabled'),
-    ).toBe(false)
+    expect(screen.getByText(/organization dashboard/i)).toBeTruthy()
+    expect((screen.getByRole('button', { name: /post event/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    expect(screen.getByText(/not verified administrator authorization/i)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /managing hosted events/i })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /collaboration requests/i })).toBeTruthy()
 
     fireEvent.change(screen.getByRole('textbox', { name: /event title/i }), {
       target: { value: 'Community Workshop' },
@@ -128,9 +139,49 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('button', { name: /start date/i }))
     fireEvent.click(screen.getByRole('button', { name: /post event/i }))
 
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'An event with this title already exists. Please choose a different title.',
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByRole('textbox', { name: /event title/i }) as HTMLInputElement).value).toBe(
+      'Community Workshop',
+    )
+    expect((screen.getByRole('textbox', { name: /event location/i }) as HTMLInputElement).value).toBe(
+      'Campus Center',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /post event/i }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not save the event: network unavailable',
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    expect((screen.getByRole('textbox', { name: /event title/i }) as HTMLInputElement).value).toBe(
+      'Community Workshop',
+    )
+
+    let resolveEventSave = () => {}
+    const pendingEventSave = new Promise<void>((resolve) => {
+      resolveEventSave = resolve
+    })
+    vi.mocked(saveEventItem).mockImplementation(() => pendingEventSave)
+    const publishButton = screen.getByRole('button', { name: /post event/i })
+    fireEvent.click(publishButton)
+    fireEvent.click(publishButton)
+    expect(saveEventItem).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('button', { name: /publishing\.\.\./i }).hasAttribute('disabled')).toBe(
+      true,
+    )
+
+    await act(async () => {
+      resolveEventSave()
+      await pendingEventSave
+    })
+
     expect(await screen.findByRole('heading', { name: /community workshop/i })).toBeTruthy()
     const eventSuccessMessage = screen.getByRole('status')
-    expect(eventSuccessMessage.textContent).toMatch(/community workshop was posted to the event board/i)
+    expect(eventSuccessMessage.textContent).toBe(
+      "Event 'Community Workshop' has been published successfully!",
+    )
     expect(eventSuccessMessage.closest('form')).toBeTruthy()
     expect((screen.getByRole('textbox', { name: /event title/i }) as HTMLInputElement).value).toBe('')
     expect((screen.getByRole('textbox', { name: /event location/i }) as HTMLInputElement).value).toBe('')
@@ -146,7 +197,8 @@ describe('CoHost app', () => {
         day < 10 ? `0${day}` : day
       }`
     }
-    expect(saveEventItem).toHaveBeenCalledWith(
+    expect(saveEventItem).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         hostOwnerId: 'user-123',
         hostProfileType: 'organization',
@@ -157,9 +209,8 @@ describe('CoHost app', () => {
     const activeProfileSelect = screen.getByRole('combobox', { name: /active profile/i })
     const studentOption = screen.getByRole('option', { name: /alex morgan — student/i })
     fireEvent.change(activeProfileSelect, { target: { value: (studentOption as HTMLOptionElement).value } })
-    expect(
-      screen.getByRole('button', { name: /post event/i }).closest('fieldset')?.hasAttribute('disabled'),
-    ).toBe(true)
+    expect(screen.getByText(/student dashboard/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /post event/i })).toBeNull()
     expect(screen.getByText(/you are hosting this event and cannot request to join it/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /send request/i })).toBeNull()
     expect(saveEventRequest).not.toHaveBeenCalled()

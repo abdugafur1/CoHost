@@ -1,16 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: Inter, 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #020817;
-  color: #e2e8f0;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 * {
@@ -32,6 +34,5 @@ p {
 }
 
 input[type='checkbox'] {
-  accent-color: #22d3ee;
+  accent-color: #2563eb;
 }
-
