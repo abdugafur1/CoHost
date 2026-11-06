@@ -26,6 +26,7 @@ export interface EventItem {
   capacity: number
   attendees: number
   createdAt: string
+  titleReservationId?: string
 }
 
 export interface EventRequest {
