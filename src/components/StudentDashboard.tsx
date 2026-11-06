@@ -63,7 +63,11 @@ export const StudentDashboard = ({
           onFieldChange={onProfileFieldChange}
           onSubmit={onCreateProfile}
         />
-        <InboxPanel inbox={inbox} onMarkRead={onMarkRead} />
+        <InboxPanel
+          inbox={inbox}
+          profileId={activeProfile?.id ?? null}
+          onMarkRead={onMarkRead}
+        />
       </aside>
       <EventList
         events={events}

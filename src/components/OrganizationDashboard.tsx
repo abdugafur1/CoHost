@@ -41,6 +41,10 @@ interface OrganizationDashboardProps {
   onDraftChange: (eventId: string, field: 'attendeeCount' | 'message', value: string) => void
   onDatesChange: (eventId: string, dates: string[]) => void
   onRequest: (event: EventItem, requestKind: 'participation' | 'cohost') => void
+  onResolveRequest: (
+    request: EventRequest,
+    status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
+  ) => Promise<void>
   onMarkRead: (noticeId: string) => void
 }
 
@@ -68,6 +72,7 @@ export const OrganizationDashboard = ({
   onDraftChange,
   onDatesChange,
   onRequest,
+  onResolveRequest,
   onMarkRead,
 }: OrganizationDashboardProps) => {
   const opportunities = events.filter(
@@ -112,7 +117,12 @@ export const OrganizationDashboard = ({
             onDatesChange={onDatesChange}
             onRequest={onRequest}
           />
-          <CollaborationRequests requests={collaborationRequests} events={events} />
+          <CollaborationRequests
+            requests={collaborationRequests}
+            events={events}
+            profile={activeProfile}
+            onResolveRequest={onResolveRequest}
+          />
         </div>
         <aside className="space-y-6">
           <ProfilePanel
@@ -126,7 +136,11 @@ export const OrganizationDashboard = ({
             onFieldChange={onProfileFieldChange}
             onSubmit={onCreateProfile}
           />
-          <InboxPanel inbox={inbox} onMarkRead={onMarkRead} />
+          <InboxPanel
+            inbox={inbox}
+            profileId={activeProfile?.id ?? null}
+            onMarkRead={onMarkRead}
+          />
         </aside>
       </div>
     </>

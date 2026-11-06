@@ -6,7 +6,6 @@ import {
   type User,
 } from 'firebase/auth'
 import {
-  addDoc,
   collection,
   doc,
   getDocs,
@@ -63,6 +62,89 @@ export const subscribeEvents = (
     },
     onError,
   )
+
+export const subscribeEventRequests = (
+  ownerId: string,
+  profileId: string,
+  profileType: UserProfile['profileType'],
+  onRequests: (requests: EventRequest[]) => void,
+  onError: (error: Error) => void,
+) => {
+  const subscriptions: {
+    collectionName: 'participationRequests' | 'cohostRequests'
+    requestType: EventRequest['requestType']
+    ownerField: 'requesterOwnerId' | 'hostOwnerId'
+    profileField: 'requesterProfileId' | 'hostProfileId'
+  }[] =
+    profileType === 'student'
+      ? [
+          {
+            collectionName: 'participationRequests',
+            requestType: 'participation',
+            ownerField: 'requesterOwnerId',
+            profileField: 'requesterProfileId',
+          },
+        ]
+      : [
+          {
+            collectionName: 'cohostRequests',
+            requestType: 'cohost',
+            ownerField: 'requesterOwnerId',
+            profileField: 'requesterProfileId',
+          },
+          {
+            collectionName: 'participationRequests',
+            requestType: 'participation',
+            ownerField: 'hostOwnerId',
+            profileField: 'hostProfileId',
+          },
+          {
+            collectionName: 'cohostRequests',
+            requestType: 'cohost',
+            ownerField: 'hostOwnerId',
+            profileField: 'hostProfileId',
+          },
+        ]
+  let active = true
+  const requestsBySubscription: EventRequest[][] = subscriptions.map(() => [])
+  const unsubscribe = subscriptions.map(
+    ({ collectionName, requestType, ownerField, profileField }, index) =>
+      onSnapshot(
+        query(
+          collection(db, collectionName),
+          where(ownerField, '==', ownerId),
+          where(profileField, '==', profileId),
+        ),
+        (snapshot) => {
+          if (!active) return
+          requestsBySubscription[index] = snapshot.docs.map(
+            (requestSnapshot) =>
+              ({
+                ...requestSnapshot.data(),
+                id: requestSnapshot.id,
+                requestType,
+              }) as EventRequest,
+          )
+          const requests: EventRequest[] = []
+          requestsBySubscription.forEach((subscriptionRequests) =>
+            subscriptionRequests.forEach((request) => {
+              if (!requests.some((candidate) => candidate.id === request.id)) {
+                requests.push(request)
+              }
+            }),
+          )
+          requests.sort((first, second) => second.createdAt.localeCompare(first.createdAt))
+          onRequests(requests)
+        },
+        onError,
+      ),
+  )
+
+  return () => {
+    active = false
+    unsubscribe.forEach((stop) => stop())
+  }
+}
 
 export const subscribeAuthUser = (
   onUser: (user: User | null) => void,
@@ -214,7 +296,81 @@ export const deleteEventItem = async (event: EventItem) => {
   })
 }
 
+export const createEventRequestId = (
+  eventId: string,
+  requesterOwnerId: string,
+  requesterProfileId: string,
+  requestType: EventRequest['requestType'],
+) => `${eventId}_${requesterOwnerId}_${requesterProfileId}_${requestType}`
+
+const getRequestCollectionName = (requestType: EventRequest['requestType']) =>
+  requestType === 'participation' ? 'participationRequests' : 'cohostRequests'
+
 export const saveEventRequest = async (request: EventRequest) => {
-  const requestRef = collection(db, 'eventRequests')
-  await addDoc(requestRef, request)
+  const requestRef = doc(db, getRequestCollectionName(request.requestType), request.id)
+  await setDoc(requestRef, {
+    requestType: request.requestType,
+    eventId: request.eventId,
+    eventTitle: request.eventTitle,
+    hostOwnerId: request.hostOwnerId,
+    hostProfileId: request.hostProfileId,
+    requesterOwnerId: request.requesterOwnerId,
+    requesterProfileId: request.requesterProfileId,
+    requesterName: request.requesterName,
+    requesterProfileType: request.requesterProfileType,
+    availableDates: request.availableDates,
+    attendeeCount: request.attendeeCount,
+    message: request.message,
+    status: request.status,
+    createdAt: request.createdAt,
+  })
+}
+
+export const resolveEventRequest = async (
+  request: EventRequest,
+  status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
+  hostOwnerId: string,
+  hostProfileId: string,
+) => {
+  const requestRef = doc(db, getRequestCollectionName(request.requestType), request.id)
+  const eventRef = doc(db, 'events', request.eventId)
+  const resolvedAt = new Date().toISOString()
+
+  await runTransaction(db, async (transaction) => {
+    const [requestSnapshot, eventSnapshot] = await Promise.all([
+      transaction.get(requestRef),
+      transaction.get(eventRef),
+    ])
+
+    if (!requestSnapshot.exists() || !eventSnapshot.exists()) {
+      throw new Error('This request or its event no longer exists.')
+    }
+
+    const storedRequest = requestSnapshot.data() as EventRequest
+    const event = eventSnapshot.data() as EventItem
+    if (
+      event.hostOwnerId !== hostOwnerId ||
+      storedRequest.hostOwnerId !== hostOwnerId ||
+      storedRequest.hostProfileId !== hostProfileId ||
+      event.hostId !== hostProfileId
+    ) {
+      throw new Error('You are not authorized to respond to this request.')
+    }
+    if (storedRequest.status !== 'pending') {
+      throw new Error('This request has already been reviewed.')
+    }
+
+    if (status === 'accepted' && storedRequest.requestType === 'participation') {
+      const nextAttendeeCount = event.attendees + storedRequest.attendeeCount
+      if (nextAttendeeCount > event.capacity) {
+        throw new Error('There are not enough spots remaining to accept this request.')
+      }
+      transaction.update(eventRef, {
+        attendees: nextAttendeeCount,
+        lastAcceptedParticipationRequestId: request.id,
+      })
+    }
+
+    transaction.update(requestRef, { status, resolvedAt, resolvedByProfileId: hostProfileId })
+  })
 }

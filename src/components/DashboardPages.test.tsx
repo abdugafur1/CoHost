@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { OrganizationDashboard } from './OrganizationDashboard'
 import { StudentDashboard } from './StudentDashboard'
 import { HostedEvents } from './DashboardComponents'
-import type { EventItem, UserProfile } from '../types'
+import type { EventItem, EventRequest, UserProfile } from '../types'
 
 const studentProfile: UserProfile = {
   id: 'student-1',
@@ -38,6 +38,24 @@ const event: EventItem = {
   capacity: 20,
   attendees: 3,
   createdAt: '2026-10-10T10:00:00.000Z',
+}
+
+const incomingRequest: EventRequest = {
+  id: 'event-1_student-owner_participation',
+  requestType: 'participation',
+  eventId: event.id,
+  eventTitle: event.title,
+  hostOwnerId: organizationProfile.ownerId,
+  hostProfileId: organizationProfile.id,
+  requesterOwnerId: 'student-owner',
+  requesterProfileId: studentProfile.id,
+  requesterName: studentProfile.name,
+  requesterProfileType: 'student',
+  availableDates: ['2026-12-01'],
+  attendeeCount: 1,
+  message: 'Interested in joining.',
+  status: 'pending',
+  createdAt: '2026-10-11T10:00:00.000Z',
 }
 
 const profileForm = {
@@ -92,6 +110,7 @@ describe('role-specific dashboards', () => {
         profiles={[organizationProfile]}
         events={[event]}
         collaborationRequests={[]}
+        onResolveRequest={vi.fn().mockResolvedValue(undefined)}
         hostForm={{
           title: '',
           location: '',
@@ -121,6 +140,44 @@ describe('role-specific dashboards', () => {
     expect(onRequest).toHaveBeenCalledWith(event, 'cohost')
     expect(screen.queryByRole('button', { name: /send participation request/i })).toBeNull()
     expect(screen.getByText(/not verified administrator authorization/i)).toBeTruthy()
+  })
+
+  it('lets the host accept or decline an incoming event request', async () => {
+    const onResolveRequest = vi.fn().mockResolvedValue(undefined)
+    render(
+      <OrganizationDashboard
+        activeProfile={organizationProfile}
+        {...sharedProps}
+        profiles={[organizationProfile]}
+        events={[event]}
+        collaborationRequests={[incomingRequest]}
+        hostForm={{
+          title: '',
+          location: '',
+          startDate: '',
+          endDate: '',
+          capacity: '12',
+          description: '',
+          audience: 'everyone',
+        }}
+        eventFormFeedback={null}
+        eventFeedbackRef={createRef<HTMLParagraphElement>()}
+        isPublishing={false}
+        onHostFieldChange={vi.fn()}
+        onHostRangeChange={vi.fn()}
+        onHostEvent={vi.fn()}
+        onUpdateEvent={vi.fn()}
+        onDeleteEvent={vi.fn()}
+        onResolveRequest={onResolveRequest}
+      />,
+    )
+
+    expect(screen.getByText(/jordan student requested participation/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^accept$/i }))
+
+    await waitFor(() =>
+      expect(onResolveRequest).toHaveBeenCalledWith(incomingRequest, 'accepted'),
+    )
   })
 })
 
