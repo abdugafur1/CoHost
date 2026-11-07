@@ -9,7 +9,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest --ui",
-    "coverage": "vitest run --coverage"
+    "test:rules": "firebase emulators:exec --only firestore --project demo-cohost \"npm run test:rules:emulator\"",
+    "test:rules:emulator": "vitest run src/services/firestoreRules.emulator.test.ts && vitest run src/services/firestoreCompatibility.emulator.test.ts && vitest run src/services/cleanLaunch.emulator.test.ts",
+    "coverage": "vitest run --coverage",
+    "test:migration": "node --test scripts/migrate-publication.nodecheck.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -21,6 +24,7 @@
   "devDependencies": {
     "@babel/core": "^8.0.6",
     "@eslint/js": "^10.0.1",
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@rolldown/plugin-babel": "^0.2.4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

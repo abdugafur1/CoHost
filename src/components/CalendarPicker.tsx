@@ -97,7 +97,13 @@ const CalendarPicker = (props: CalendarPickerProps) => {
   }
 
   return (
-    <div className={props.mode === 'range' ? 'calendar-range-picker' : 'calendar-picker'}>
+    <div
+      className={
+        props.mode === 'range'
+          ? 'calendar-range-picker'
+          : 'calendar-picker calendar-picker-compact'
+      }
+    >
       {props.mode === 'range' ? (
         <div className="grid grid-cols-2 gap-3">
           <button

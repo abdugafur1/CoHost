@@ -24,11 +24,15 @@ export const loadLocalProfiles = (): UserProfile[] => {
   const storedProfiles = localStorage.getItem(profilesStorageKey)
   if (!storedProfiles) return []
 
-  const parsedProfiles: unknown = JSON.parse(storedProfiles)
-  if (!Array.isArray(parsedProfiles) || !parsedProfiles.every(isUserProfile)) {
-    throw new Error("Saved profile data is invalid. Clear this site's local storage and try again.")
+  try {
+    const parsedProfiles: unknown = JSON.parse(storedProfiles)
+    if (Array.isArray(parsedProfiles) && parsedProfiles.every(isUserProfile)) return parsedProfiles
+  } catch {
+    // Repair only CoHost's disposable profile cache, never Firebase Auth state.
   }
-  return parsedProfiles
+  localStorage.removeItem(profilesStorageKey)
+  localStorage.removeItem(activeProfileStorageKey)
+  return []
 }
 
 export const saveLocalProfiles = (profiles: UserProfile[]) => {
