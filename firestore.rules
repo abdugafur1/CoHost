@@ -10,6 +10,18 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == ownerId;
     }
 
+    function hasOrganizationAccess() {
+      let accountPath = /databases/$(database)/documents/organizationAccounts/$(request.auth.uid);
+      return signedIn()
+        && exists(accountPath)
+        && get(accountPath).data.profileId is string
+        && exists(/databases/$(database)/documents/userProfiles/$(get(accountPath).data.profileId))
+        && get(/databases/$(database)/documents/userProfiles/$(get(accountPath).data.profileId)).data.ownerId
+          == request.auth.uid
+        && get(/databases/$(database)/documents/userProfiles/$(get(accountPath).data.profileId)).data.profileType
+          == 'organization';
+    }
+
     match /userProfiles/{profileId} {
       allow create: if owns(request.resource.data.ownerId);
       allow read, delete: if owns(resource.data.ownerId);
@@ -17,9 +29,245 @@ service cloud.firestore {
         && request.resource.data.ownerId == resource.data.ownerId;
     }
 
+    match /organizationAccounts/{ownerId} {
+      function organizationProfilePath() {
+        return /databases/$(database)/documents/userProfiles/$(request.resource.data.profileId);
+      }
+
+      function isOwnedOrganizationProfile() {
+        return existsAfter(organizationProfilePath())
+          && getAfter(organizationProfilePath()).data.ownerId == request.auth.uid
+          && getAfter(organizationProfilePath()).data.profileType == 'organization'
+          && getAfter(organizationProfilePath()).data.id == request.resource.data.profileId;
+      }
+
+      allow read: if owns(ownerId);
+      allow create, update: if owns(ownerId)
+        && request.resource.data.keys().hasOnly(['profileId'])
+        && request.resource.data.profileId is string
+        && isOwnedOrganizationProfile();
+      allow delete: if owns(ownerId);
+    }
+
+    match /publicOrganizations/{profileId} {
+      function privateProfilePath() {
+        return /databases/$(database)/documents/userProfiles/$(profileId);
+      }
+
+      function matchesPublicOrganizationProfile() {
+        let profile = getAfter(privateProfilePath()).data;
+        return existsAfter(privateProfilePath())
+          && profile.ownerId == request.auth.uid
+          && profile.id == profileId
+          && profile.profileType == 'organization'
+          && profile.directoryVisible == true
+          && request.resource.data.profileId == profileId
+          && request.resource.data.name == profile.name
+          && request.resource.data.description == profile.description
+          && request.resource.data.focus == profile.focus
+          && request.resource.data.location == profile.location
+          && request.resource.data.interests == profile.interests
+          && request.resource.data.eventTypes == profile.eventTypes
+          && request.resource.data.availableResources == profile.availableResources
+          && request.resource.data.collaborationPreferences == profile.collaborationPreferences;
+      }
+
+      function hasOnlyPublicOrganizationFields() {
+        return request.resource.data.keys().hasAll([
+            'profileId', 'name', 'description', 'focus', 'location', 'interests',
+            'eventTypes', 'availableResources', 'collaborationPreferences'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'profileId', 'name', 'description', 'focus', 'location', 'interests',
+            'eventTypes', 'availableResources', 'collaborationPreferences'
+          ])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 100
+          && request.resource.data.description is string
+          && request.resource.data.description.size() <= 2000
+          && request.resource.data.focus is string
+          && request.resource.data.focus.size() <= 100
+          && request.resource.data.location is string
+          && request.resource.data.location.size() <= 150
+          && request.resource.data.interests is list
+          && request.resource.data.interests.size() <= 8
+          && request.resource.data.interests.hasOnly([
+            'Technology', 'Sports', 'Arts', 'Culture', 'Education',
+            'Community Service', 'Health & Wellness', 'Business'
+          ])
+          && request.resource.data.eventTypes is list
+          && request.resource.data.eventTypes.size() <= 7
+          && request.resource.data.eventTypes.hasOnly([
+            'Workshops', 'Seminars', 'Sports Events', 'Social Events', 'Fundraisers',
+            'Competitions', 'Networking Events'
+          ])
+          && request.resource.data.availableResources is list
+          && request.resource.data.availableResources.size() <= 7
+          && request.resource.data.availableResources.hasOnly([
+            'Event Venue', 'Equipment', 'Guest Speakers', 'Volunteers', 'Promotion',
+            'Technical Support', 'Event Planning Experience'
+          ])
+          && request.resource.data.collaborationPreferences is list
+          && request.resource.data.collaborationPreferences.size() <= 4
+          && request.resource.data.collaborationPreferences.hasOnly([
+            'Open to co-hosting', 'Looking for co-hosts', 'Resource sharing',
+            'Cross-promotion'
+          ]);
+      }
+
+      allow read: if true;
+      allow create: if signedIn()
+        && hasOnlyPublicOrganizationFields()
+        && matchesPublicOrganizationProfile();
+      allow update: if signedIn()
+        && resource.data.profileId == profileId
+        && hasOnlyPublicOrganizationFields()
+        && matchesPublicOrganizationProfile();
+      allow delete: if signedIn()
+        && existsAfter(privateProfilePath())
+        && owns(getAfter(privateProfilePath()).data.ownerId);
+    }
+
+    function unfrozen(eventId) {
+      return !exists(/databases/$(database)/documents/eventMigrationLocks/$(eventId));
+    }
+
+    function controlPath(eventId) {
+      return /databases/$(database)/documents/eventCollaboration/$(eventId);
+    }
+
+    function accountingStep(eventId, requestId, delta) {
+      let before = get(controlPath(eventId)).data;
+      let after = getAfter(controlPath(eventId)).data;
+      return after.revision == before.revision + 1
+        && after.lastRequestId == requestId
+        && after.pendingCount == before.pendingCount + delta;
+    }
+
+    function collaborationReady(eventId) {
+      let c = get(controlPath(eventId)).data;
+      return c.pendingCount == 0 && c.acceptedCount == c.partnerProfileIds.size()
+        && c.acceptedCount <= 8;
+    }
+
+    // The control document is an inductive proof, initialized only with a new
+    // event or by the separately authorized Admin migration. One request per step.
+    match /eventCollaboration/{eventId} {
+      function eventBefore() {
+        return get(/databases/$(database)/documents/events/$(eventId)).data;
+      }
+      function validShape() {
+        let c = request.resource.data;
+        return c.keys().hasOnly(['pendingCount', 'totalRequests', 'acceptedCount',
+            'partnerProfileIds', 'lastRequestId', 'revision'])
+          && c.pendingCount is int && c.pendingCount >= 0
+          && c.totalRequests is int && c.totalRequests >= c.pendingCount
+          && c.acceptedCount is int && c.acceptedCount >= 0 && c.acceptedCount <= 8
+          && c.partnerProfileIds is list && c.partnerProfileIds.size() == c.acceptedCount
+          && c.partnerProfileIds.toSet().size() == c.partnerProfileIds.size()
+          && c.lastRequestId is string && c.revision is int;
+      }
+      function validStep() {
+        let c = request.resource.data;
+        let old = resource.data;
+        let path = /databases/$(database)/documents/cohostRequests/$(c.lastRequestId);
+        let r = getAfter(path).data;
+        let e = eventBefore();
+        return validShape() && c.revision == old.revision + 1
+          && e.collaborationVersion == 2 && e.publicationStatus == 'pending_collaboration'
+          && getAfter(/databases/$(database)/documents/events/$(eventId)).data.publicationStatus == 'pending_collaboration'
+          && r.eventId == eventId && r.hostOwnerId == e.hostOwnerId && r.hostProfileId == e.hostId
+          && (exists(path)
+            ? owns(e.hostOwnerId) && get(path).data.status == 'pending'
+              && r.status in ['accepted', 'declined']
+              && c.pendingCount == old.pendingCount - 1 && c.totalRequests == old.totalRequests
+              && (r.status == 'accepted'
+                ? c.partnerProfileIds == old.partnerProfileIds.concat([r.requesterProfileId])
+                  && c.acceptedCount == old.acceptedCount + 1
+                : c.partnerProfileIds == old.partnerProfileIds && c.acceptedCount == old.acceptedCount)
+            : owns(r.requesterOwnerId) && r.status == 'pending'
+              && c.pendingCount == old.pendingCount + 1 && c.totalRequests == old.totalRequests + 1
+              && c.partnerProfileIds == old.partnerProfileIds && c.acceptedCount == old.acceptedCount);
+      }
+      allow get: if signedIn() && (owns(get(/databases/$(database)/documents/events/$(eventId)).data.hostOwnerId)
+        || (get(/databases/$(database)/documents/events/$(eventId)).data.publicationStatus == 'pending_collaboration'
+          && hasOrganizationAccess()));
+      allow list: if false;
+      allow create: if signedIn() && unfrozen(eventId) && validShape()
+        && !exists(/databases/$(database)/documents/events/$(eventId))
+        && owns(getAfter(/databases/$(database)/documents/events/$(eventId)).data.hostOwnerId)
+        && getAfter(/databases/$(database)/documents/events/$(eventId)).data.collaborationVersion == 2
+        && request.resource.data.pendingCount == 0 && request.resource.data.totalRequests == 0
+        && request.resource.data.acceptedCount == 0 && request.resource.data.partnerProfileIds == []
+        && request.resource.data.lastRequestId == '' && request.resource.data.revision == 0;
+      allow update: if signedIn() && unfrozen(eventId) && validStep();
+      allow delete: if false;
+    }
+
+    // Only a separately authorized Admin SDK process may freeze/migrate events.
+    match /eventMigrationLocks/{eventId} {
+      allow read, write: if false;
+    }
+
     match /events/{eventId} {
       function hostProfilePath() {
         return /databases/$(database)/documents/userProfiles/$(request.resource.data.hostId);
+      }
+
+      function validPublicationStatus() {
+        return request.resource.data.get('publicationStatus', 'draft') in [
+          'draft', 'pending_collaboration', 'ready_to_publish', 'published', 'cancelled'
+        ];
+      }
+
+      function validPublicationTransition() {
+        let currentStatus = resource.data.get('publicationStatus', 'draft');
+        let nextStatus = request.resource.data.get('publicationStatus', 'draft');
+        return validPublicationStatus()
+          && (
+            nextStatus == currentStatus
+            || (currentStatus == 'draft' && nextStatus in ['pending_collaboration', 'cancelled'])
+            || (currentStatus == 'pending_collaboration'
+              && nextStatus in ['ready_to_publish', 'cancelled'])
+            || (currentStatus == 'ready_to_publish'
+              && nextStatus in ['published', 'pending_collaboration', 'cancelled'])
+            || (currentStatus == 'published' && nextStatus == 'cancelled')
+          )
+          && (nextStatus != 'ready_to_publish'
+            || (request.resource.data.collaborationRequirementsCompleted == true
+              && (currentStatus == 'ready_to_publish' || (resource.data.get('collaborationVersion', 0) == 2 && collaborationReady(eventId)))))
+          && (nextStatus != 'published'
+            || (
+              request.resource.data.collaborationRequirementsCompleted == true
+              && (currentStatus == 'published' || (currentStatus == 'ready_to_publish'
+                && resource.data.get('collaborationVersion', 0) == 2 && collaborationReady(eventId)))
+            ));
+      }
+
+      function validPartnerAppend() {
+        let before = get(controlPath(eventId)).data;
+        let after = getAfter(controlPath(eventId)).data;
+        let r = getAfter(/databases/$(database)/documents/cohostRequests/$(after.lastRequestId)).data;
+        return resource.data.get('collaborationVersion', 0) == 2
+          && after.revision == before.revision + 1 && after.acceptedCount == before.acceptedCount + 1
+          && r.status == 'accepted' && r.eventId == eventId
+          && request.resource.data.confirmedCoHosts == resource.data.confirmedCoHosts.concat([
+            {'profileId': r.requesterProfileId, 'name': r.requesterName}
+          ])
+          && request.resource.data.confirmedCoHosts.size() <= 8;
+      }
+
+      function legacyRegistryAppend() {
+        let before = resource.data.get('cohostRequestIds', []);
+        let after = request.resource.data.cohostRequestIds;
+        let id = after[after.size() - 1];
+        let r = getAfter(/databases/$(database)/documents/cohostRequests/$(id)).data;
+        return signedIn() && unfrozen(eventId) && resource.data.get('collaborationVersion', 0) != 2
+          && resource.data.get('publicationStatus', 'draft') == 'pending_collaboration'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cohostRequestIds'])
+          && after == before.concat([id]) && after.toSet().size() == after.size()
+          && !exists(/databases/$(database)/documents/cohostRequests/$(id))
+          && r.eventId == eventId && owns(r.requesterOwnerId) && r.status == 'pending';
       }
 
       function attendanceIsValid() {
@@ -43,8 +291,22 @@ service cloud.firestore {
               + get(/databases/$(database)/documents/participationRequests/$(nextRequestId)).data.attendeeCount;
       }
 
-      allow read: if true;
-      allow create: if owns(request.resource.data.hostOwnerId)
+      allow get, list: if resource.data.get('publicationStatus', 'draft') == 'published'
+        || owns(resource.data.hostOwnerId)
+        || (
+          resource.data.get('publicationStatus', 'draft') == 'pending_collaboration'
+          && hasOrganizationAccess()
+        );
+      allow create: if unfrozen(eventId) && owns(request.resource.data.hostOwnerId)
+        && validPublicationStatus()
+        && request.resource.data.get('publicationStatus', 'draft') in ['draft', 'pending_collaboration']
+        && request.resource.data.get('collaborationRequirementsCompleted', false) == false
+        && (request.resource.data.get('collaborationVersion', 0) == 2
+          ? request.resource.data.confirmedCoHosts == []
+            && getAfter(controlPath(eventId)).data.revision == 0
+            && !exists(controlPath(eventId))
+          : !('collaborationVersion' in request.resource.data)
+            && !('confirmedCoHosts' in request.resource.data))
         && request.resource.data.hostProfileType == 'organization'
         && exists(hostProfilePath())
         && get(hostProfilePath()).data.ownerId == request.auth.uid
@@ -57,7 +319,12 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostId == request.resource.data.hostId
         && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostOwnerId == request.auth.uid
         && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.title == request.resource.data.title;
-      allow update: if owns(resource.data.hostOwnerId)
+      allow update: if legacyRegistryAppend();
+      allow update: if unfrozen(eventId) && owns(resource.data.hostOwnerId)
+        && request.resource.data.get('collaborationVersion', 0) == resource.data.get('collaborationVersion', 0)
+        && ('collaborationVersion' in request.resource.data) == ('collaborationVersion' in resource.data)
+        && request.resource.data.get('cohostRequestIds', []) == resource.data.get('cohostRequestIds', [])
+        && ('cohostRequestIds' in request.resource.data) == ('cohostRequestIds' in resource.data)
         && request.resource.data.hostOwnerId == resource.data.hostOwnerId
         && request.resource.data.hostId == resource.data.hostId
         && request.resource.data.hostProfileType == resource.data.hostProfileType
@@ -65,7 +332,10 @@ service cloud.firestore {
         && get(hostProfilePath()).data.ownerId == request.auth.uid
         && get(hostProfilePath()).data.id == request.resource.data.hostId
         && get(hostProfilePath()).data.profileType == 'organization'
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['confirmedCoHosts'])
+          || validPartnerAppend())
         && attendanceIsValid()
+        && validPublicationTransition()
         && request.resource.data.titleReservationId is string
         && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.eventId == eventId
         && getAfter(/databases/$(database)/documents/eventTitleReservations/$(request.resource.data.titleReservationId)).data.hostId == resource.data.hostId
@@ -74,7 +344,10 @@ service cloud.firestore {
         && (!('titleReservationId' in resource.data)
           || resource.data.titleReservationId == request.resource.data.titleReservationId
           || !existsAfter(/databases/$(database)/documents/eventTitleReservations/$(resource.data.titleReservationId)));
-      allow delete: if owns(resource.data.hostOwnerId)
+      // Keep the control tombstone even for empty events: IDs cannot be reused.
+      allow delete: if unfrozen(eventId) && resource.data.get('collaborationVersion', 0) == 2
+        && get(controlPath(eventId)).data.totalRequests == 0
+        && owns(resource.data.hostOwnerId)
         && (!('titleReservationId' in resource.data)
           || !existsAfter(/databases/$(database)/documents/eventTitleReservations/$(resource.data.titleReservationId)));
     }
@@ -84,7 +357,7 @@ service cloud.firestore {
         return getAfter(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data;
       }
 
-      allow read: if signedIn();
+      allow read: if owns(resource.data.hostOwnerId) || hasOrganizationAccess();
       allow create: if owns(request.resource.data.hostOwnerId)
         && matchingEvent().titleReservationId == reservationId
         && matchingEvent().hostId == request.resource.data.hostId
@@ -145,6 +418,8 @@ service cloud.firestore {
           && get(eventDoc).data.hostId == request.resource.data.hostProfileId
           && get(eventDoc).data.hostOwnerId != request.auth.uid
           && get(eventDoc).data.hostProfileType == 'organization'
+          && get(eventDoc).data.publicationStatus == 'published'
+          && get(eventDoc).data.publicationStatus != 'cancelled'
           && get(eventDoc).data.audience == 'everyone'
           && get(eventDoc).data.attendees < get(eventDoc).data.capacity
           && request.resource.data.eventTitle == get(eventDoc).data.title
@@ -183,7 +458,9 @@ service cloud.firestore {
           && get(hostProfile).data.profileType == 'organization'
           && (
             request.resource.data.status == 'accepted'
-              ? getAfter(eventRef).data.attendees == get(eventRef).data.attendees + resource.data.attendeeCount
+              ? get(eventRef).data.get('publicationStatus', 'draft') == 'published'
+                && getAfter(eventRef).data.publicationStatus == 'published'
+                && getAfter(eventRef).data.attendees == get(eventRef).data.attendees + resource.data.attendeeCount
                 && getAfter(eventRef).data.lastAcceptedParticipationRequestId == requestId
               : getAfter(eventRef).data.attendees == get(eventRef).data.attendees
                 && getAfter(eventRef).data.get('lastAcceptedParticipationRequestId', '')
@@ -191,10 +468,10 @@ service cloud.firestore {
           );
       }
 
-      allow create: if validCreate();
+      allow create: if unfrozen(request.resource.data.eventId) && validCreate();
       allow get: if owns(resource.data.requesterOwnerId) || owns(resource.data.hostOwnerId);
       allow list: if owns(resource.data.requesterOwnerId) || owns(resource.data.hostOwnerId);
-      allow update: if hostOwnsRequest()
+      allow update: if unfrozen(resource.data.eventId) && hostOwnsRequest()
         && resource.data.requestType == 'participation'
         && validResolution();
       allow delete: if false;
@@ -217,7 +494,11 @@ service cloud.firestore {
         let eventDoc = eventPath(request.resource.data.eventId);
         let requesterProfile = requesterProfilePath(request.resource.data.requesterProfileId);
         let hostProfile = hostProfilePath(request.resource.data.hostProfileId);
-        return exists(eventDoc)
+        let requestedResources = get(eventDoc).data.get('resourcesNeeded', []);
+        return unfrozen(request.resource.data.eventId)
+          && (get(eventDoc).data.get('collaborationVersion', 0) != 2
+            || accountingStep(request.resource.data.eventId, requestId, 1))
+          && exists(eventDoc)
           && exists(requesterProfile)
           && exists(hostProfile)
           && request.resource.data.keys().hasAll([
@@ -228,7 +509,8 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly([
             'requestType', 'eventId', 'eventTitle', 'hostOwnerId', 'hostProfileId', 'requesterOwnerId',
             'requesterProfileId', 'requesterName', 'requesterProfileType',
-            'availableDates', 'attendeeCount', 'message', 'status', 'createdAt'
+            'availableDates', 'attendeeCount', 'message', 'status', 'createdAt',
+            'resourcesProvided', 'contributionDescription', 'estimatedAttendees'
           ])
           && requestId == request.resource.data.eventId + '_'
             + request.resource.data.requesterOwnerId + '_'
@@ -238,15 +520,37 @@ service cloud.firestore {
           && request.resource.data.status == 'pending'
           && request.resource.data.requesterProfileType == 'organization'
           && request.resource.data.attendeeCount is int
-          && request.resource.data.attendeeCount > 0
+          && request.resource.data.attendeeCount == 0
+          && (!('estimatedAttendees' in request.resource.data)
+            || (request.resource.data.estimatedAttendees is int
+              && request.resource.data.estimatedAttendees > 0
+              && request.resource.data.attendeeCount == 0))
           && request.resource.data.availableDates is list
           && request.resource.data.availableDates.size() > 0
+          && (
+            (!('resourcesProvided' in request.resource.data)
+              && !('contributionDescription' in request.resource.data))
+            || ('resourcesProvided' in request.resource.data
+              && 'contributionDescription' in request.resource.data
+              && request.resource.data.resourcesProvided is list
+              && request.resource.data.contributionDescription is string
+              && request.resource.data.contributionDescription.matches('.*\\S.*'))
+          )
+          && (requestedResources.size() > 0
+            ? 'resourcesProvided' in request.resource.data
+              && 'contributionDescription' in request.resource.data
+              && request.resource.data.resourcesProvided.size() > 0
+              && request.resource.data.contributionDescription.matches('.*\\S.*')
+              && request.resource.data.resourcesProvided.hasOnly(requestedResources)
+            : (!('resourcesProvided' in request.resource.data)
+              || request.resource.data.resourcesProvided.hasOnly(['General contribution'])))
           && request.resource.data.message is string
           && request.resource.data.createdAt is string
           && get(eventDoc).data.hostOwnerId == request.resource.data.hostOwnerId
           && get(eventDoc).data.hostId == request.resource.data.hostProfileId
           && get(eventDoc).data.hostOwnerId != request.auth.uid
           && get(eventDoc).data.hostProfileType == 'organization'
+          && get(eventDoc).data.publicationStatus == 'pending_collaboration'
           && request.resource.data.eventTitle == get(eventDoc).data.title
           && request.resource.data.availableDates.hasOnly(get(eventDoc).data.dateOptions)
           && get(requesterProfile).data.ownerId == request.auth.uid
@@ -271,11 +575,24 @@ service cloud.firestore {
       function validResolution() {
         let eventRef = /databases/$(database)/documents/events/$(resource.data.eventId);
         let hostProfile = hostProfilePath(resource.data.hostProfileId);
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        return unfrozen(resource.data.eventId)
+          && (get(eventRef).data.get('collaborationVersion', 0) != 2
+            || (accountingStep(resource.data.eventId, requestId, -1)
+              && (request.resource.data.status != 'accepted'
+                || getAfter(eventRef).data.confirmedCoHosts == get(eventRef).data.confirmedCoHosts.concat([
+                  {'profileId': resource.data.requesterProfileId, 'name': resource.data.requesterName}
+                ]))))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'resolvedAt', 'resolvedByProfileId'
           ])
+          && get(eventRef).data.get('publicationStatus', 'draft') == 'pending_collaboration'
           && resource.data.status == 'pending'
           && request.resource.data.status in ['accepted', 'declined']
+          && (request.resource.data.status != 'accepted'
+            || (get(/databases/$(database)/documents/userProfiles/$(resource.data.requesterProfileId)).data.ownerId == resource.data.requesterOwnerId
+              && get(/databases/$(database)/documents/userProfiles/$(resource.data.requesterProfileId)).data.id == resource.data.requesterProfileId
+              && get(/databases/$(database)/documents/userProfiles/$(resource.data.requesterProfileId)).data.profileType == 'organization'
+              && get(/databases/$(database)/documents/userProfiles/$(resource.data.requesterProfileId)).data.name == resource.data.requesterName))
           && request.resource.data.resolvedAt is string
           && request.resource.data.resolvedByProfileId == resource.data.hostProfileId
           && exists(hostProfile)
