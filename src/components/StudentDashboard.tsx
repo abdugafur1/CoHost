@@ -45,13 +45,22 @@ export const StudentDashboard = ({
   onMarkRead,
 }: StudentDashboardProps) => (
   <>
-    <div className="mb-6">
-      <p className="text-sm uppercase tracking-[0.2em] text-blue-600">Student dashboard</p>
-      <h2 className="mt-1 text-3xl font-bold text-slate-900">Find your campus community</h2>
-      <p className="mt-2 text-slate-600">Browse events and request a place to participate.</p>
+    <div className="dashboard-heading">
+      <p className="text-sm uppercase tracking-[0.2em] text-orange-800">Student dashboard</p>
+      <h2 className="mt-1 text-3xl font-bold text-stone-900">Find your campus community</h2>
+      <p className="mt-2 text-stone-600">Browse events and request a place to participate.</p>
     </div>
-    <div className="grid gap-6 lg:grid-cols-[0.7fr_1.3fr]">
-      <aside className="space-y-6">
+    <div className="workspace">
+      <EventList
+        events={events}
+        activeProfile={activeProfile}
+        requestDrafts={requestDrafts}
+        requestKind="participation"
+        onDraftChange={onDraftChange}
+        onDatesChange={onDatesChange}
+        onRequest={onRequest}
+      />
+      <aside className="profile-sidebar space-y-6">
         <ProfilePanel
           activeProfile={activeProfile}
           profiles={profiles}
@@ -69,15 +78,7 @@ export const StudentDashboard = ({
           onMarkRead={onMarkRead}
         />
       </aside>
-      <EventList
-        events={events}
-        activeProfile={activeProfile}
-        requestDrafts={requestDrafts}
-        requestKind="participation"
-        onDraftChange={onDraftChange}
-        onDatesChange={onDatesChange}
-        onRequest={onRequest}
-      />
+
     </div>
   </>
 )
