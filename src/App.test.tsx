@@ -50,6 +50,27 @@ beforeEach(() => {
 })
 
 describe('CoHost app', () => {
+  it('opens the correct pages from the redesigned header and welcome links', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
+    fireEvent.click(screen.getByRole('link', { name: /find an event/i }))
+    expect(screen.getByRole('button', { name: /^events$/i }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('heading', { name: /available community events/i })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('link', { name: /host an event/i }))
+    expect(screen.getByRole('button', { name: /^profile$/i }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('link', { name: /browse events/i }))
+    expect(screen.getByRole('button', { name: /^events$/i }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('button', { name: /^account$/i }))
+    expect(screen.getByRole('button', { name: /^profile$/i }).getAttribute('aria-current')).toBe('page')
+
+    fireEvent.click(screen.getByRole('link', { name: /cohost home/i }))
+    expect(screen.getByRole('button', { name: /^dashboard$/i }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('link', { name: /skip to events/i }))
+    expect(screen.getByRole('button', { name: /^events$/i }).getAttribute('aria-current')).toBe('page')
+  })
+
   it('renders an empty event board and continues without email', async () => {
     vi.mocked(continueWithoutEmail).mockResolvedValue({ uid: 'user-123' } as never)
 

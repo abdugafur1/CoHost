@@ -70,7 +70,7 @@ export const OrganizationDashboard = ({
   return (
     <>
       {view === 'dashboard' ? (
-        <div className="mb-6">
+        <div className="dashboard-heading">
           <p className="text-sm uppercase tracking-[0.2em] text-violet-600">
             Organization dashboard
           </p>
@@ -81,7 +81,7 @@ export const OrganizationDashboard = ({
         </div>
       ) : null}
       <div className="grid gap-6">
-        <div id="events" className="space-y-6">
+        <div className="space-y-6">
           <HostEventForm
             hostForm={hostForm}
             feedback={eventFormFeedback}

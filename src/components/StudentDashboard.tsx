@@ -30,14 +30,14 @@ export const StudentDashboard = ({
 }: StudentDashboardProps) => (
   <>
     {view === 'dashboard' ? (
-      <div className="mb-6">
+      <div className="dashboard-heading">
         <p className="text-sm uppercase tracking-[0.2em] text-blue-600">Student dashboard</p>
         <h2 className="mt-1 text-3xl font-bold text-slate-900">Find your campus community</h2>
         <p className="mt-2 text-slate-600">Browse events and request a place to participate.</p>
       </div>
     ) : null}
     <div className="grid gap-6">
-      <div id="events">
+      <div>
         <EventList
           events={events.filter((event) => event.publicationStatus === 'published')}
           activeProfile={activeProfile}
