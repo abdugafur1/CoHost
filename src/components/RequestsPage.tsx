@@ -137,7 +137,7 @@ export const RequestsPage = ({
     return (
       <article
         key={requestKey}
-        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        className="requests-surface border p-5"
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -173,7 +173,7 @@ export const RequestsPage = ({
         <div className="mt-4 flex flex-wrap gap-3">
           <button
             type="button"
-            className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100"
+            className="button-secondary"
             onClick={() => {
               setFeedback(null)
               setSelectedRequestKey(requestKey)
@@ -193,7 +193,7 @@ export const RequestsPage = ({
               </button>
               <button
                 type="button"
-                className="rounded-full border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={Boolean(resolvingRequestKey)}
                 onClick={() => void resolveRequest(request, 'declined')}
               >
@@ -207,9 +207,9 @@ export const RequestsPage = ({
   }
 
   return (
-    <section aria-labelledby="requests-heading" className="space-y-6">
+    <section aria-labelledby="requests-heading" className="requests-page space-y-6">
       <header>
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">Requests</p>
+        <p className="requests-label text-sm font-semibold uppercase tracking-[0.2em]">Requests</p>
         <h2 id="requests-heading" className="mt-1 text-3xl font-bold text-slate-900">
           Manage event requests
         </h2>
@@ -234,18 +234,14 @@ export const RequestsPage = ({
               setActiveTab(tab)
               setFeedback(null)
             }}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              activeTab === tab
-                ? 'bg-gradient-to-r from-blue-600 to-violet-600 text-white'
-                : 'border border-slate-200 bg-white text-slate-700 hover:bg-blue-50'
-            }`}
+            className="requests-tab rounded-full border px-4 py-2 text-sm font-semibold"
           >
             {label}
           </button>
         ))}
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="requests-surface border p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap gap-2" aria-label="Filter requests by type">
             {([
@@ -258,11 +254,7 @@ export const RequestsPage = ({
                 type="button"
                 aria-pressed={filter === value}
                 onClick={() => setFilter(value)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-                  filter === value
-                    ? 'bg-violet-100 text-violet-800'
-                    : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
+                className="requests-filter rounded-full border px-3 py-1.5 text-sm font-medium"
               >
                 {label}
               </button>
@@ -286,7 +278,7 @@ export const RequestsPage = ({
               .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
               .map((request) => requestCard(request, activeTab === 'incoming'))
           ) : (
-            <p className="rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+            <p className="requests-empty px-4 py-6 text-center text-sm">
               {activeTab === 'incoming' && profile?.profileType !== 'organization'
                 ? 'Student profiles do not receive event approval requests.'
                 : `No ${filter === 'all' ? '' : `${filter === 'cohost' ? 'co-hosting' : 'participation'} `}requests to show.`}
@@ -306,14 +298,14 @@ export const RequestsPage = ({
           }}
         >
           <section
-            className="profile-modal max-h-[90vh] overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 text-slate-950 shadow-2xl sm:p-7"
+            className="profile-modal requests-surface max-h-[90vh] overflow-y-auto border p-5 sm:p-7"
             role="dialog"
             aria-modal="true"
             aria-labelledby="request-details-heading"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-bold uppercase tracking-wide text-blue-800">Request details</p>
+                <p className="requests-label text-sm font-bold uppercase tracking-wide">Request details</p>
                 <h3 id="request-details-heading" className="mt-1 text-2xl font-extrabold text-slate-950">
                   {selectedRequest?.requestType === 'cohost'
                     ? 'Co-Hosting Request'
@@ -374,11 +366,7 @@ export const RequestsPage = ({
                       ].map(({ label, resources }) => (
                         <section
                           key={label}
-                          className={`rounded-2xl border p-4 ${
-                            label === 'We Request'
-                              ? 'border-blue-200 bg-blue-50'
-                              : 'border-violet-200 bg-violet-50'
-                          }`}
+                          className="requests-resource border p-4"
                           aria-label={label}
                         >
                           <h5 className="text-base font-extrabold text-slate-950">{label}</h5>
@@ -387,11 +375,7 @@ export const RequestsPage = ({
                               {resources.map((resource) => (
                                 <li
                                   key={resource}
-                                  className={`rounded-full px-3 py-1.5 text-sm font-bold ${
-                                    label === 'We Request'
-                                      ? 'bg-blue-100 text-blue-900 ring-1 ring-inset ring-blue-200'
-                                      : 'bg-violet-100 text-violet-900 ring-1 ring-inset ring-violet-200'
-                                  }`}
+                                  className="requests-resource-tag rounded-full border px-3 py-1.5 text-sm font-bold"
                                 >
                                   {resource === 'Other' && selectedEvent?.needOtherResource?.trim()
                                     ? `Other — ${selectedEvent.needOtherResource.trim()}`
@@ -403,7 +387,7 @@ export const RequestsPage = ({
                             <p className="mt-2 text-sm font-medium text-slate-700">Not specified</p>
                           )}
                           {label === 'They Provide' ? (
-                            <div className="mt-3 border-t border-violet-200 pt-3">
+                            <div className="mt-3 border-t border-[var(--line)] pt-3">
                               <h6 className="text-sm font-bold text-slate-900">Contribution details</h6>
                               <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
                                 {selectedRequest.contributionDescription?.trim() || 'Not specified'}
@@ -411,7 +395,7 @@ export const RequestsPage = ({
                             </div>
                           ) : selectedEvent &&
                             (selectedEvent.resourcesNeeded ?? []).indexOf('Other') !== -1 ? (
-                            <div className="mt-3 border-t border-blue-200 pt-3 text-sm text-slate-800">
+                            <div className="mt-3 border-t border-[var(--line)] pt-3 text-sm text-slate-800">
                               <p className="font-bold">Other resource details</p>
                               <p className="mt-1 whitespace-pre-wrap">
                                 {[selectedEvent.needOtherResource, selectedEvent.needOtherDescription]
@@ -486,7 +470,7 @@ export const RequestsPage = ({
                       type="button"
                       disabled={Boolean(resolvingRequestKey)}
                       onClick={() => void resolveRequest(selectedRequest, 'declined')}
-                      className="rounded-full border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {resolvingRequestKey === `${selectedRequest.requestType}:${selectedRequest.id}` ? 'Declining...' : 'Decline'}
                     </button>
