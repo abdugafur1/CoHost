@@ -1,5 +1,5 @@
 import type { ChangeEvent, FormEvent, RefObject } from 'react'
-import type { EventItem, EventRequest, InboxNotice, UserProfile } from '../types'
+import type { EventItem, EventRequest, InboxNotice, UserProfile, WorkspacePage } from '../types'
 import {
   CollaborationRequests,
   CreateProfileForm,
@@ -14,6 +14,9 @@ import {
 } from './DashboardComponents'
 
 interface OrganizationDashboardProps {
+  page: WorkspacePage
+  discoveryEventId: string | null
+  onSelectDiscoveryEvent: (eventId: string | null) => void
   activeProfile: UserProfile | null
   profiles: UserProfile[]
   authUserId: string | null
@@ -36,11 +39,12 @@ interface OrganizationDashboardProps {
   ) => void
   onHostRangeChange: (startDate: string, endDate: string) => void
   onHostEvent: (event: FormEvent<HTMLFormElement>) => void
+  onResetHostForm: () => void
   onUpdateEvent: (event: EventItem) => Promise<void>
   onDeleteEvent: (event: EventItem) => Promise<void>
   onDraftChange: (eventId: string, field: 'attendeeCount' | 'message', value: string) => void
   onDatesChange: (eventId: string, dates: string[]) => void
-  onRequest: (event: EventItem, requestKind: 'participation' | 'cohost') => void
+  onRequest: (event: EventItem, requestKind: 'participation' | 'cohost') => Promise<boolean>
   onResolveRequest: (
     request: EventRequest,
     status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
@@ -49,6 +53,9 @@ interface OrganizationDashboardProps {
 }
 
 export const OrganizationDashboard = ({
+  page,
+  discoveryEventId,
+  onSelectDiscoveryEvent,
   activeProfile,
   profiles,
   authUserId,
@@ -67,6 +74,7 @@ export const OrganizationDashboard = ({
   onHostFieldChange,
   onHostRangeChange,
   onHostEvent,
+  onResetHostForm,
   onUpdateEvent,
   onDeleteEvent,
   onDraftChange,
@@ -83,67 +91,53 @@ export const OrganizationDashboard = ({
   )
 
   return (
-    <>
-      <div className="dashboard-heading">
-        <p className="text-sm uppercase tracking-[0.2em] text-orange-800">Organization dashboard</p>
-        <h2 className="mt-1 text-3xl font-bold text-stone-900">Build campus collaborations</h2>
-        <p className="mt-2 text-stone-600">
-          Publish events and connect with other campus organizations.
-        </p>
-      </div>
-      <div className="workspace">
+    <div className="focused-workspace">
+      {page === 'events' ? (
+        <EventList
+          key={activeProfile?.id ?? 'guest'}
+          events={opportunities}
+          activeProfile={activeProfile}
+          requestDrafts={requestDrafts}
+          requestKind="cohost"
+          requests={collaborationRequests}
+          initialEventId={discoveryEventId}
+          onSelectEvent={onSelectDiscoveryEvent}
+          onDraftChange={onDraftChange}
+          onDatesChange={onDatesChange}
+          onRequest={onRequest}
+        />
+      ) : null}
+      {page === 'host' ? (
+        <HostEventForm
+          hostForm={hostForm}
+          feedback={eventFormFeedback}
+          feedbackRef={eventFeedbackRef}
+          isPublishing={isPublishing}
+          onFieldChange={onHostFieldChange}
+          onRangeChange={onHostRangeChange}
+          onSubmit={onHostEvent}
+          onReset={onResetHostForm}
+        />
+      ) : null}
+      {page === 'manage' ? (
+        <HostedEvents events={events} profile={activeProfile}
+          onUpdate={onUpdateEvent} onDelete={onDeleteEvent} />
+      ) : null}
+      {page === 'inbox' ? (
         <div className="space-y-6">
-          <EventList
-            events={opportunities}
-            activeProfile={activeProfile}
-            requestDrafts={requestDrafts}
-            requestKind="cohost"
-            onDraftChange={onDraftChange}
-            onDatesChange={onDatesChange}
-            onRequest={onRequest}
-          />
-          <HostEventForm
-            hostForm={hostForm}
-            feedback={eventFormFeedback}
-            feedbackRef={eventFeedbackRef}
-            isPublishing={isPublishing}
-            onFieldChange={onHostFieldChange}
-            onRangeChange={onHostRangeChange}
-            onSubmit={onHostEvent}
-          />
-          <HostedEvents
-            events={events}
-            profile={activeProfile}
-            onUpdate={onUpdateEvent}
-            onDelete={onDeleteEvent}
-          />
-
-          <CollaborationRequests
-            requests={collaborationRequests}
-            events={events}
-            profile={activeProfile}
-            onResolveRequest={onResolveRequest}
-          />
+          <CollaborationRequests requests={collaborationRequests} events={events}
+            profile={activeProfile} onResolveRequest={onResolveRequest} />
+          <InboxPanel inbox={inbox} profileId={activeProfile?.id ?? null} onMarkRead={onMarkRead} />
         </div>
-        <aside className="profile-sidebar space-y-6">
-          <ProfilePanel
-            activeProfile={activeProfile}
-            profiles={profiles}
-            authUserId={authUserId}
-            onSelectProfile={onSelectProfile}
-          />
-          <CreateProfileForm
-            profileForm={profileForm}
-            onFieldChange={onProfileFieldChange}
-            onSubmit={onCreateProfile}
-          />
-          <InboxPanel
-            inbox={inbox}
-            profileId={activeProfile?.id ?? null}
-            onMarkRead={onMarkRead}
-          />
-        </aside>
-      </div>
-    </>
+      ) : null}
+      {page === 'profile' ? (
+        <div className="space-y-6">
+          <ProfilePanel activeProfile={activeProfile} profiles={profiles}
+            authUserId={authUserId} onSelectProfile={onSelectProfile} />
+          <CreateProfileForm profileForm={profileForm}
+            onFieldChange={onProfileFieldChange} onSubmit={onCreateProfile} />
+        </div>
+      ) : null}
+    </div>
   )
 }
