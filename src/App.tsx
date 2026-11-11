@@ -24,7 +24,6 @@ import {
 } from './services/localPersistence'
 import { OrganizationDashboard } from './components/OrganizationDashboard'
 import { StudentDashboard } from './components/StudentDashboard'
-import { WorkspaceHome } from './components/WorkspaceHome'
 import type {
   HostFormValues,
   ProfileFormValues,
@@ -37,7 +36,6 @@ import type {
   InboxNotice,
   ProfileType,
   UserProfile,
-  WorkspacePage,
 } from './types'
 
 const emptyProfileForm: ProfileFormValues = {
@@ -101,19 +99,7 @@ const loadInitialProfileState = () => {
   }
 }
 
-const readWorkspacePage = (): WorkspacePage => {
-  const hash = window.location.hash.slice(1)
-  return ['events', 'host', 'manage', 'inbox', 'profile'].indexOf(hash) !== -1
-    ? hash as WorkspacePage : 'home'
-}
-
 const App = () => {
-  const [page, setPage] = useState<WorkspacePage>(readWorkspacePage)
-  const [discoveryEventId, setDiscoveryEventId] = useState<string | null>(null)
-  const navigate = (next: WorkspacePage) => {
-    setPage(next)
-    window.location.hash = next
-  }
   const [initialProfileState] = useState(loadInitialProfileState)
   const [profiles, setProfiles] = useState<UserProfile[]>(initialProfileState.profiles)
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(
@@ -123,13 +109,10 @@ const App = () => {
   const [eventRequests, setEventRequests] = useState<EventRequest[]>([])
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
   const [authUserId, setAuthUserId] = useState<string | null>(null)
-  const [profileForm, setProfileForm] = useState<ProfileFormValues>(() => ({
-    ...emptyProfileForm,
-    profileType: readWorkspacePage() === 'host' ? 'organization' : 'student',
-  }))
+  const [profileForm, setProfileForm] = useState(emptyProfileForm)
   const [hostForm, setHostForm] = useState(emptyHostForm)
   const [requestDrafts, setRequestDrafts] = useState<Record<string, RequestDraftValues>>({})
-  const [statusMessage, setStatusMessage] = useState('')
+  const [statusMessage, setStatusMessage] = useState('Create a profile to get started.')
   const [errorMessage, setErrorMessage] = useState<string | null>(initialProfileState.error)
   const [eventFormFeedback, setEventFormFeedback] = useState<{
     type: 'success' | 'error'
@@ -138,20 +121,6 @@ const App = () => {
   const [isPublishing, setIsPublishing] = useState(false)
   const publishingRef = useRef(false)
   const eventFeedbackRef = useRef<HTMLParagraphElement>(null)
-
-  useEffect(() => {
-    const onHashChange = () => {
-      const next = readWorkspacePage()
-      setPage(next)
-      setErrorMessage(null)
-      setStatusMessage('')
-      if (next === 'host') {
-        setProfileForm((current) => ({ ...current, profileType: 'organization' }))
-      }
-    }
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
-  }, [])
 
   useEffect(() => {
     if (eventFormFeedback?.type === 'success') {
@@ -368,7 +337,6 @@ const App = () => {
       setProfiles(syncedProfiles)
       setActiveProfile(syncedProfile)
       await saveUserProfile(syncedProfile)
-      if (page === 'profile' && discoveryEventId) navigate('events')
     } catch (error) {
       setErrorMessage(
         `Profile is saved on this device, but Firebase sync failed: ${
@@ -481,7 +449,7 @@ const App = () => {
   ) => {
     if (!activeProfile || !authUserId || activeProfile.ownerId !== authUserId) {
       setErrorMessage('Create a profile before requesting to join an event.')
-      return false
+      return
     }
 
     if (
@@ -489,7 +457,7 @@ const App = () => {
       (requestKind === 'cohost' && activeProfile.profileType !== 'organization')
     ) {
       setErrorMessage('Switch to the matching profile type to submit this request.')
-      return false
+      return
     }
 
     if (
@@ -497,36 +465,27 @@ const App = () => {
       eventItem.hostOwnerId === activeProfile.ownerId
     ) {
       setErrorMessage('You cannot request to join an event hosted by your account.')
-      return false
+      return
     }
 
     if (eventItem.audience === 'organizations' && activeProfile.profileType !== 'organization') {
       setErrorMessage('This event is open to organizations only.')
-      return false
+      return
     }
 
     const draft = requestDrafts[eventItem.id] ?? { ...emptyDraft }
-    const selectedDates = draft.dates
+    const selectedDates = draft.dates.length > 0 ? draft.dates : eventItem.dateOptions.slice(0, 1)
     const attendeeCount =
-      activeProfile.profileType === 'student' ? 1 : Number(draft.attendeeCount)
+      activeProfile.profileType === 'student' ? 1 : Number(draft.attendeeCount) || 1
     if (selectedDates.length === 0) {
       setErrorMessage('Choose at least one date before sending your request.')
-      return false
-    }
-
-    if (!selectedDates.every((date) => eventItem.dateOptions.indexOf(date) !== -1)) {
-      setErrorMessage('Choose dates from the event’s current availability.')
-      return false
-    }
-    if (!Number.isInteger(attendeeCount) || attendeeCount < 1) {
-      setErrorMessage('Participant count must be a whole number of at least one.')
-      return false
+      return
     }
 
     const openSpots = eventItem.capacity - eventItem.attendees
     if (requestKind === 'participation' && attendeeCount > openSpots) {
       setErrorMessage(`Only ${openSpots} spots remain for this event.`)
-      return false
+      return
     }
 
     const requestId = createEventRequestId(
@@ -537,7 +496,7 @@ const App = () => {
     )
     if (eventRequests.some((request) => request.id === requestId)) {
       setErrorMessage('A request for this event has already been sent from this profile.')
-      return false
+      return
     }
 
     const newRequest: EventRequest = {
@@ -563,22 +522,22 @@ const App = () => {
 
     try {
       await saveEventRequest(newRequest)
-      setEventRequests((current) => current.some((request) => request.id === newRequest.id)
-        ? current : [newRequest, ...current])
       setRequestDrafts((current) => ({
         ...current,
         [eventItem.id]: { ...emptyDraft },
       }))
-      setStatusMessage('')
+      setStatusMessage(
+        requestKind === 'cohost'
+          ? `Your co-hosting request for ${eventItem.title} has been sent.`
+          : `Your participation request for ${eventItem.title} has been sent.`,
+      )
       setErrorMessage(null)
-      return true
     } catch (error) {
       setErrorMessage(
         `Could not send your request: ${
           error instanceof Error ? error.message : 'unknown Firebase error'
         }`,
       )
-      return false
     }
   }
 
@@ -625,8 +584,6 @@ const App = () => {
     if (!selectedProfile) return
     saveActiveProfileId(selectedProfile.id)
     setActiveProfile(selectedProfile)
-    setRequestDrafts({})
-    setEventRequests([])
   }
 
   const activeProfileRequests = activeProfile?.ownerId === authUserId
@@ -678,33 +635,33 @@ const App = () => {
     }))
   }
 
+  const totalOpenSpots = events.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0)
+
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#main-content" onClick={(event) => {
-        event.preventDefault()
-        const main = document.getElementById('main-content')
-        main?.focus()
-        main?.scrollIntoView?.({ block: 'start' })
-      }}>Skip to content</a>
+      <a className="skip-link" href="#events">Skip to events</a>
       <header className="site-header">
         <div className="header-inner">
-          <a href="#home" className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
-          <nav aria-label="Main navigation">
-            {([
-              ['home', 'Home'], ['events', 'Find an event'], ['host', 'Create an event'],
-              ...(activeProfile?.profileType === 'organization' ? [['manage', 'My events']] : []),
-              ['inbox', 'Inbox'], ['profile', 'Profile'],
-            ] as [WorkspacePage, string][]).map(([destination, label]) => (
-              <a key={destination} href={`#${destination}`} aria-current={page === destination ? 'page' : undefined}>
-                {label}
-              </a>
-            ))}
-          </nav>
+          <a href="#" className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
+          <nav aria-label="Main navigation"><a href="#events">Find an event</a><a href={activeProfile?.profileType === 'organization' ? '#host' : '#profile'}>Host an event</a></nav>
           <button type="button" onClick={handleContinueWithoutEmail} className="button-secondary account-button">{authUserId ? 'Account saved on this device' : 'Continue without email'}</button>
         </div>
       </header>
 
-      <main id="main-content" className="main-content" tabIndex={-1}>
+      <main className="main-content">
+        <section className="welcome" aria-labelledby="welcome-title">
+          <div>
+            <p className="eyebrow">CoHost</p>
+            <h2 id="welcome-title">Use CoHost now</h2>
+            <p className="welcome-copy">Find an event to join or plan one with another club.</p>
+            <a className="text-link" href="#events">Browse events</a>
+          </div>
+          <dl className="community-stats" aria-label="Community event activity">
+            <div><dt>Events on the board</dt><dd>{events.length}</dd></div>
+            <div><dt>Open places</dt><dd>{totalOpenSpots}</dd></div>
+            <div><dt>Your profiles</dt><dd>{profiles.length}</dd></div>
+          </dl>
+        </section>
         {statusMessage ? (
           <div aria-live="polite" className="status-note">
             {statusMessage}
@@ -718,11 +675,8 @@ const App = () => {
             {errorMessage}
           </div>
         ) : null}
-        {page === 'home' ? <WorkspaceHome profile={activeProfile} /> : activeProfile?.profileType === 'organization' ? (
+        {activeProfile?.profileType === 'organization' ? (
           <OrganizationDashboard
-            page={page}
-            discoveryEventId={discoveryEventId}
-            onSelectDiscoveryEvent={setDiscoveryEventId}
             activeProfile={activeProfile}
             profiles={profiles}
             authUserId={authUserId}
@@ -744,21 +698,16 @@ const App = () => {
               setHostForm((current) => ({ ...current, startDate, endDate }))
             }}
             onHostEvent={handleHostEvent}
-            onResetHostForm={() => setEventFormFeedback(null)}
             onUpdateEvent={handleUpdateEvent}
             onDeleteEvent={handleDeleteEvent}
             onDraftChange={handleRequestDraftChange}
             onDatesChange={handleRequestDatesChange}
-            onRequest={handleJoinRequest}
+            onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
             onResolveRequest={(request, status) => handleResolveRequest(request, status)}
             onMarkRead={markNotificationRead}
           />
         ) : (
           <StudentDashboard
-            page={page}
-            discoveryEventId={discoveryEventId}
-            onSelectDiscoveryEvent={setDiscoveryEventId}
-            requests={activeProfileRequests}
             activeProfile={activeProfile}
             profiles={profiles}
             authUserId={authUserId}
@@ -771,13 +720,11 @@ const App = () => {
             onProfileFieldChange={handleProfileFieldChange}
             onDraftChange={handleRequestDraftChange}
             onDatesChange={handleRequestDatesChange}
-            onRequest={handleJoinRequest}
+            onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
             onMarkRead={markNotificationRead}
           />
         )}
-        <footer className="site-footer"><span>CoHost</span><button type="button" onClick={() => {
-          window.scrollTo({ top: 0, behavior: 'instant' })
-        }}>Back to top</button></footer>
+        <footer className="site-footer"><span>CoHost</span><a href="#">Back to top</a></footer>
       </main>
     </div>
   )

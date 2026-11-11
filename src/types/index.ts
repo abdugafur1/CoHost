@@ -1,6 +1,5 @@
 export type ProfileType = 'student' | 'organization'
 export type EventAudience = 'everyone' | 'organizations'
-export type WorkspacePage = 'home' | 'events' | 'host' | 'manage' | 'inbox' | 'profile'
 
 export interface UserProfile {
   id: string
