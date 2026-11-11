@@ -6,14 +6,20 @@ import {
   createEventRequestId,
   deleteEventItem,
   resolveEventRequest,
+  ensureOrganizationAccount,
+  saveOrganizationProfile,
   saveUserProfile,
+  signInWithGoogle,
+  signOutUser,
   saveEventItem,
   saveEventRequest,
   subscribeAuthUser,
   subscribeEvents,
   subscribeEventRequests,
+  subscribePublicOrganizations,
   subscribeUserProfiles,
   updateEventItem,
+  publishEvent,
 } from './services/cohost'
 import {
   getLocalDeviceId,
@@ -24,9 +30,15 @@ import {
 } from './services/localPersistence'
 import { OrganizationDashboard } from './components/OrganizationDashboard'
 import { StudentDashboard } from './components/StudentDashboard'
+import { ProfilePage } from './components/ProfilePage'
+import { ClubDiscovery } from './components/ClubDiscovery'
+import { RequestsPage } from './components/RequestsPage'
+import { InboxPanel } from './components/DashboardComponents'
 import type {
+  CoHostRequestDetails,
   HostFormValues,
   ProfileFormValues,
+  ResourceFormField,
   RequestDraftValues,
 } from './components/DashboardComponents'
 import type {
@@ -35,6 +47,7 @@ import type {
   EventRequest,
   InboxNotice,
   ProfileType,
+  PublicOrganization,
   UserProfile,
 } from './types'
 
@@ -44,6 +57,11 @@ const emptyProfileForm: ProfileFormValues = {
   focus: 'General club activities',
   location: '',
   description: '',
+  interests: [],
+  eventTypes: [],
+  availableResources: [],
+  collaborationPreferences: [],
+  directoryVisible: false,
 }
 
 const emptyHostForm: HostFormValues = {
@@ -54,12 +72,41 @@ const emptyHostForm: HostFormValues = {
   capacity: '12',
   description: '',
   audience: 'everyone' as EventAudience,
+  resourcesOffered: [],
+  offerDescription: '',
+  offerOtherResource: '',
+  offerOtherDescription: '',
+  resourcesNeeded: [],
+  needDescription: '',
+  needOtherResource: '',
+  needOtherDescription: '',
 }
 
 const emptyDraft: RequestDraftValues = {
   dates: [] as string[],
   attendeeCount: '2',
   message: '',
+}
+
+const readNotificationsStorageKey = 'cohost.readNotificationIds'
+
+const loadReadNotificationState = (): { ids: string[]; error: string | null } => {
+  try {
+    const savedIds = localStorage.getItem(readNotificationsStorageKey)
+    if (!savedIds) return { ids: [], error: null }
+    const parsedIds: unknown = JSON.parse(savedIds)
+    if (!Array.isArray(parsedIds) || !parsedIds.every((id) => typeof id === 'string')) {
+      throw new Error('Saved inbox read state is invalid.')
+    }
+    return { ids: parsedIds, error: null }
+  } catch (error) {
+    return {
+      ids: [],
+      error: `Could not restore inbox read state: ${
+        error instanceof Error ? error.message : 'unknown storage error'
+      }`,
+    }
+  }
 }
 
 const getDatesInRange = (startDate: string, endDate: string) => {
@@ -81,45 +128,45 @@ const getDatesInRange = (startDate: string, endDate: string) => {
   return dates
 }
 
-const loadInitialProfileState = () => {
-  try {
-    const profiles = loadLocalProfiles()
-    const activeProfileId = loadActiveProfileId()
-    return {
-      profiles,
-      activeProfile: profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0] ?? null,
-      error: null,
-    }
-  } catch (error) {
-    return {
-      profiles: [],
-      activeProfile: null,
-      error: error instanceof Error ? error.message : 'Could not load your saved local profile.',
-    }
-  }
-}
-
 const App = () => {
-  const [initialProfileState] = useState(loadInitialProfileState)
-  const [profiles, setProfiles] = useState<UserProfile[]>(initialProfileState.profiles)
-  const [activeProfile, setActiveProfile] = useState<UserProfile | null>(
-    initialProfileState.activeProfile,
-  )
+  const [savedReadState] = useState(loadReadNotificationState)
+  const [profiles, setProfiles] = useState<UserProfile[]>([])
+  const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null)
   const [events, setEvents] = useState<EventItem[]>([])
   const [eventRequests, setEventRequests] = useState<EventRequest[]>([])
-  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
+  const [readNotificationIds, setReadNotificationIds] = useState(savedReadState.ids)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
+  const [isAnonymousSession, setIsAnonymousSession] = useState(false)
+  const [authDisplayName, setAuthDisplayName] = useState<string | null>(null)
+  const [authPhotoUrl, setAuthPhotoUrl] = useState<string | null>(null)
+  const [authEmail, setAuthEmail] = useState<string | null>(null)
+  const [isGoogleAccount, setIsGoogleAccount] = useState(false)
   const [profileForm, setProfileForm] = useState(emptyProfileForm)
+  const [editProfileForm, setEditProfileForm] = useState(emptyProfileForm)
+  const [currentPage, setCurrentPage] = useState<
+    'dashboard' | 'events' | 'requests' | 'inbox' | 'profile' | 'discover'
+  >('dashboard')
+  const [requestSelection, setRequestSelection] = useState<{
+    id: string
+    requestType: EventRequest['requestType']
+  } | null>(null)
+  const [publicOrganizations, setPublicOrganizations] = useState<PublicOrganization[]>([])
+  const [isDirectoryLoading, setIsDirectoryLoading] = useState(true)
+  const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [hostForm, setHostForm] = useState(emptyHostForm)
   const [requestDrafts, setRequestDrafts] = useState<Record<string, RequestDraftValues>>({})
-  const [statusMessage, setStatusMessage] = useState('Create a profile to get started.')
-  const [errorMessage, setErrorMessage] = useState<string | null>(initialProfileState.error)
+  const [statusMessage, setStatusMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(savedReadState.error)
   const [eventFormFeedback, setEventFormFeedback] = useState<{
     type: 'success' | 'error'
     message: string
   } | null>(null)
   const [isPublishing, setIsPublishing] = useState(false)
   const publishingRef = useRef(false)
+  const pendingRequestIdsRef = useRef(new Set<string>())
+  const completedRequestIdsRef = useRef(new Set<string>())
+  const creatingProfileRef = useRef(false)
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false)
   const eventFeedbackRef = useRef<HTMLParagraphElement>(null)
 
   useEffect(() => {
@@ -133,8 +180,38 @@ const App = () => {
       subscribeAuthUser(
         (user) => {
           const nextUserId = user?.uid ?? null
+          let availableProfiles: UserProfile[] = []
+          let restoredProfile: UserProfile | null = null
+          try {
+            const localOwnerId = nextUserId ?? getLocalDeviceId()
+            availableProfiles = loadLocalProfiles().filter(
+              (profile) => profile.ownerId === localOwnerId,
+            )
+            const storedActiveId = loadActiveProfileId()
+            restoredProfile =
+              availableProfiles.find((profile) => profile.id === storedActiveId) ??
+              availableProfiles[0] ??
+              null
+            if (restoredProfile) saveActiveProfileId(restoredProfile.id)
+          } catch (error) {
+            setErrorMessage(
+              `Could not load this account's local profiles: ${
+                error instanceof Error ? error.message : 'unknown storage error'
+              }`,
+            )
+          }
           setAuthUserId(nextUserId)
-          if (!nextUserId) setEventRequests([])
+          setIsAnonymousSession(user?.isAnonymous ?? false)
+          setAuthDisplayName(user?.displayName ?? null)
+          setAuthPhotoUrl(user?.photoURL ?? null)
+          setAuthEmail(user?.email ?? null)
+          setIsGoogleAccount(
+            user?.providerData?.some((provider) => provider.providerId === 'google.com') ?? false,
+          )
+          setEventRequests([])
+          setProfiles(availableProfiles)
+          setActiveProfile(restoredProfile)
+          setCurrentPage('dashboard')
         },
         (error) => setErrorMessage(`Could not restore your local account: ${error.message}`),
       ),
@@ -142,10 +219,63 @@ const App = () => {
   )
 
   useEffect(
+    () => {
+      let isCancelled = false
+      let unsubscribe = () => {}
+      const profileType =
+        activeProfile?.ownerId === authUserId ? activeProfile.profileType : null
+
+      const startSubscription = async () => {
+        if (profileType === 'organization' && activeProfile) {
+          await ensureOrganizationAccount(activeProfile)
+        }
+        if (isCancelled) return
+        unsubscribe = subscribeEvents(
+          profileType,
+          profileType === 'organization' ? activeProfile?.ownerId ?? null : null,
+          setEvents,
+          (error) => setErrorMessage(`Could not load events: ${error.message}`),
+        )
+      }
+
+      void startSubscription().catch((error: unknown) => {
+        if (isCancelled) return
+        const firebaseError = error as Error & { code?: string }
+        console.error('Could not provision organization event discovery access', {
+          stage: 'organizationAccounts bootstrap batch',
+          profileId: activeProfile?.id,
+          ownerId: activeProfile?.ownerId,
+          code: firebaseError.code ?? 'unknown',
+          message: firebaseError.message,
+          error,
+        })
+        setErrorMessage(
+          `Could not authorize event discovery: ${
+            error instanceof Error ? error.message : 'unknown Firebase error'
+          }`,
+        )
+      })
+
+      return () => {
+        isCancelled = true
+        unsubscribe()
+      }
+    },
+    [authUserId, activeProfile],
+  )
+
+  useEffect(
     () =>
-      subscribeEvents(
-        setEvents,
-        (error) => setErrorMessage(`Could not load events: ${error.message}`),
+      subscribePublicOrganizations(
+        (organizations) => {
+          setPublicOrganizations(organizations)
+          setIsDirectoryLoading(false)
+          setDirectoryError(null)
+        },
+        (error) => {
+          setDirectoryError(error.message)
+          setIsDirectoryLoading(false)
+        },
       ),
     [],
   )
@@ -172,13 +302,13 @@ const App = () => {
           const localProfiles = loadLocalProfiles().filter(
             (localProfile) => localProfile.ownerId === authUserId,
           )
-          const mergedProfiles = [
-            ...savedProfiles,
-            ...localProfiles.filter(
-              (localProfile) =>
-                !savedProfiles.some((savedProfile) => savedProfile.id === localProfile.id),
-            ),
-          ]
+          // The server snapshot is authoritative after a reset. Do not resurrect
+          // deleted cloud profiles or overwrite newer profiles from a device cache.
+          const mergedProfiles = savedProfiles.filter((profile) => profile.ownerId === authUserId)
+          if (localProfiles.some(profile => !mergedProfiles.some(saved => saved.id === profile.id))) {
+            setStatusMessage('Your cloud profile list has changed. Create or select a profile to continue.')
+            setErrorMessage(null)
+          }
           saveLocalProfiles(mergedProfiles)
           setProfiles(mergedProfiles)
           const savedActiveProfileId = loadActiveProfileId()
@@ -216,6 +346,13 @@ const App = () => {
     }))
   }
 
+  const handleEditProfileFieldChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  ) => {
+    const { name, value } = event.target
+    setEditProfileForm((current) => ({ ...current, [name]: value }))
+  }
+
   const handleHostFieldChange = (
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
@@ -226,6 +363,33 @@ const App = () => {
       ...current,
       [name]: value,
     }))
+  }
+
+  const handleHostResourceFieldChange = (field: ResourceFormField, value: string | string[]) => {
+    setEventFormFeedback(null)
+    setHostForm((current) => {
+      if (field === 'resourcesOffered') {
+        const resources = Array.isArray(value) ? value : []
+        return {
+          ...current,
+          resourcesOffered: resources,
+          ...(resources.indexOf('Other') === -1
+            ? { offerOtherResource: '', offerOtherDescription: '' }
+            : {}),
+        }
+      }
+      if (field === 'resourcesNeeded') {
+        const resources = Array.isArray(value) ? value : []
+        return {
+          ...current,
+          resourcesNeeded: resources,
+          ...(resources.indexOf('Other') === -1
+            ? { needOtherResource: '', needOtherDescription: '' }
+            : {}),
+        }
+      }
+      return { ...current, [field]: typeof value === 'string' ? value : '' }
+    })
   }
 
   const handleRequestDraftChange = (
@@ -253,12 +417,18 @@ const App = () => {
       const syncedProfiles = localProfiles.map((profile) => ({ ...profile, ownerId: user.uid }))
       saveLocalProfiles(syncedProfiles)
       setProfiles(syncedProfiles)
-      setActiveProfile((current) =>
-        syncedProfiles.find((profile) => profile.id === current?.id) ?? syncedProfiles[0] ?? null,
-      )
-      await Promise.all(syncedProfiles.map(saveUserProfile))
+      const currentProfile =
+        syncedProfiles.find((profile) => profile.id === activeProfile?.id) ??
+        syncedProfiles.find((profile) => profile.id === loadActiveProfileId()) ??
+        syncedProfiles[0] ??
+        null
+      setActiveProfile(currentProfile)
+      if (currentProfile) saveActiveProfileId(currentProfile.id)
+      await Promise.all(localProfiles.filter(profile => profile.ownerId === deviceId)
+        .map(profile => saveUserProfile({ ...profile, ownerId: user.uid })))
       setStatusMessage('Your device account is ready and profiles are synced.')
       setErrorMessage(null)
+      setCurrentPage('dashboard')
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to continue without email right now.',
@@ -266,83 +436,201 @@ const App = () => {
     }
   }
 
-  const handleCreateProfile = async (event: FormEvent<HTMLFormElement>) => {
+  const handleGoogleSignIn = async () => {
+    try {
+      const user = await signInWithGoogle()
+      setErrorMessage(null)
+      setStatusMessage(
+        user.isAnonymous
+          ? 'Your anonymous Firebase session is ready.'
+          : 'Your Google account is connected to this Firebase session.',
+      )
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error.code === 'auth/credential-already-in-use' ||
+          error.code === 'auth/account-exists-with-different-credential')
+      ) {
+        setErrorMessage(
+          'This Google account already has a separate Firebase account. Sign out, then sign in with Google; anonymous-account profiles remain owned by that anonymous account.',
+        )
+        return
+      }
+      setErrorMessage(
+        `Could not connect your Google account: ${
+          error instanceof Error ? error.message : 'unknown authentication error'
+        }`,
+      )
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await signOutUser()
+      setStatusMessage('You have signed out. Your cloud profiles have not been deleted.')
+      setErrorMessage(null)
+      setCurrentPage('dashboard')
+    } catch (error) {
+      setErrorMessage(
+        `Could not sign out: ${
+          error instanceof Error ? error.message : 'unknown authentication error'
+        }`,
+      )
+    }
+  }
+
+  const handleCreateProfile = async (event: FormEvent<HTMLFormElement>): Promise<boolean> => {
     event.preventDefault()
+    if (creatingProfileRef.current) return false
+    creatingProfileRef.current = true
+    setIsCreatingProfile(true)
 
     const profileName = profileForm.name.trim()
     const location = profileForm.location.trim()
 
     if (!profileName || !location) {
       setErrorMessage('Add your name and location before saving the profile.')
-      return
+      creatingProfileRef.current = false
+      setIsCreatingProfile(false)
+      return false
     }
 
-    let deviceId: string
     try {
-      deviceId = getLocalDeviceId()
+      const user = await continueWithoutEmail()
+      setAuthUserId(user.uid)
+      setIsAnonymousSession(user.isAnonymous)
+      const deviceId = getLocalDeviceId()
+      const localProfiles = loadLocalProfiles().filter(
+        (profile) =>
+          profile.ownerId === user.uid || (user.isAnonymous && profile.ownerId === deviceId),
+      )
+      const nextProfile: UserProfile = {
+        id: crypto.randomUUID(),
+        ownerId: user.uid,
+        name: profileName,
+        profileType: profileForm.profileType,
+        focus: profileForm.focus,
+        location,
+        description:
+          profileForm.description.trim() ||
+          (profileForm.profileType === 'student'
+            ? 'A student ready to take part in campus events.'
+            : 'An organization ready to co-host campus events.'),
+        createdAt: new Date().toISOString(),
+        ...(profileForm.profileType === 'organization'
+          ? {
+              interests: profileForm.interests ?? [],
+              eventTypes: profileForm.eventTypes ?? [],
+              availableResources: profileForm.availableResources ?? [],
+              collaborationPreferences: profileForm.collaborationPreferences ?? [],
+              directoryVisible: false,
+            }
+          : {}),
+      }
+      const syncedProfiles = [
+        nextProfile,
+        ...localProfiles
+          .filter((profile) => profile.id !== nextProfile.id)
+          .map((profile) => ({ ...profile, ownerId: user.uid })),
+      ]
+
+      await Promise.all([saveUserProfile(nextProfile), ...localProfiles.filter(profile => profile.ownerId === deviceId)
+        .map(profile => saveUserProfile({ ...profile, ownerId: user.uid }))])
+      saveLocalProfiles(syncedProfiles)
+      saveActiveProfileId(nextProfile.id)
+      setProfiles(syncedProfiles)
+      setActiveProfile(nextProfile)
+      setProfileForm(emptyProfileForm)
+      setStatusMessage(`${nextProfile.name}'s ${nextProfile.profileType} profile was created.`)
+      setErrorMessage(null)
+      setCurrentPage('dashboard')
+      return true
     } catch (error) {
       setErrorMessage(
-        `Could not access local storage: ${error instanceof Error ? error.message : 'unknown storage error'}`,
+        `Could not create and sync the profile: ${
+          error instanceof Error ? error.message : 'unknown account or storage error'
+        }`,
       )
-      return
+      return false
+    } finally {
+      creatingProfileRef.current = false
+      setIsCreatingProfile(false)
+    }
+  }
+
+  const handleUpdateProfile = async (event: FormEvent<HTMLFormElement>): Promise<boolean> => {
+    event.preventDefault()
+    if (!activeProfile) {
+      setErrorMessage('Select a profile before editing it.')
+      return false
+    }
+    if (!authUserId || activeProfile.ownerId !== authUserId) {
+      setErrorMessage('Sign in to the Firebase account that owns this profile before editing it.')
+      return false
     }
 
-    const newProfile: UserProfile = {
-      id: crypto.randomUUID(),
-      ownerId: authUserId ?? deviceId,
-      name: profileName,
-      profileType: profileForm.profileType,
-      focus: profileForm.focus,
+    const name = editProfileForm.name.trim()
+    const location = editProfileForm.location.trim()
+    if (!name || !location) {
+      setErrorMessage('Add a name and location before saving the profile.')
+      return false
+    }
+
+    const updatedProfile: UserProfile = {
+      ...activeProfile,
+      name,
+      focus: editProfileForm.focus,
       location,
-      description:
-        profileForm.description.trim() ||
-        (profileForm.profileType === 'student'
-          ? 'A student ready to take part in campus events.'
-          : 'An organization ready to co-host campus events.'),
-      createdAt: new Date().toISOString(),
+      description: editProfileForm.description.trim(),
+      ...(activeProfile.profileType === 'organization'
+        ? {
+            interests: editProfileForm.interests ?? activeProfile.interests ?? [activeProfile.focus],
+            eventTypes: editProfileForm.eventTypes ?? activeProfile.eventTypes ?? [],
+            availableResources:
+              editProfileForm.availableResources ?? activeProfile.availableResources ?? [],
+            collaborationPreferences:
+              editProfileForm.collaborationPreferences ??
+              activeProfile.collaborationPreferences ??
+              [],
+            directoryVisible: editProfileForm.directoryVisible ?? false,
+          }
+        : {}),
     }
+    const updatedProfiles = profiles.map((profile) =>
+      profile.id === updatedProfile.id ? updatedProfile : profile,
+    )
 
-    let localProfiles: UserProfile[]
     try {
-      localProfiles = [newProfile, ...loadLocalProfiles().filter((profile) => profile.id !== newProfile.id)]
-      saveLocalProfiles(localProfiles)
-      saveActiveProfileId(newProfile.id)
+      saveLocalProfiles(updatedProfiles)
     } catch (error) {
       setErrorMessage(
         `Could not save your profile on this device: ${
           error instanceof Error ? error.message : 'unknown storage error'
         }`,
       )
-      return
+      return false
     }
 
-    setProfiles(localProfiles)
-    setActiveProfile(newProfile)
-    setProfileForm(emptyProfileForm)
-    setStatusMessage(
-      newProfile.profileType === 'organization'
-        ? `${newProfile.name} is ready to host and request co-hosted events.`
-        : `${newProfile.name} is ready to discover and request events.`,
-    )
+    setProfiles(updatedProfiles)
+    setActiveProfile(updatedProfile)
     setErrorMessage(null)
-
     try {
-      const user = await continueWithoutEmail()
-      setAuthUserId(user.uid)
-      const syncedProfile = { ...newProfile, ownerId: user.uid }
-      const syncedProfiles = localProfiles.map((profile) =>
-        profile.id === syncedProfile.id ? syncedProfile : profile,
-      )
-      saveLocalProfiles(syncedProfiles)
-      setProfiles(syncedProfiles)
-      setActiveProfile(syncedProfile)
-      await saveUserProfile(syncedProfile)
+      if (updatedProfile.profileType === 'organization') {
+        await saveOrganizationProfile(updatedProfile)
+      } else {
+        await saveUserProfile(updatedProfile)
+      }
+      setStatusMessage(`${updatedProfile.name}'s profile has been updated.`)
+      return true
     } catch (error) {
       setErrorMessage(
-        `Profile is saved on this device, but Firebase sync failed: ${
+        `Profile changes are saved on this device, but Firebase sync failed: ${
           error instanceof Error ? error.message : 'unknown Firebase error'
         }`,
       )
+      return false
     }
   }
 
@@ -388,10 +676,32 @@ const App = () => {
         location,
         description: hostForm.description.trim() || 'Looking for a co-hosting partner.',
         audience: hostForm.audience,
+        resourcesOffered: [...hostForm.resourcesOffered],
+        offerDescription: hostForm.offerDescription.trim(),
+        offerOtherResource:
+          hostForm.resourcesOffered.indexOf('Other') !== -1
+            ? hostForm.offerOtherResource.trim()
+            : '',
+        offerOtherDescription:
+          hostForm.resourcesOffered.indexOf('Other') !== -1
+            ? hostForm.offerOtherDescription.trim()
+            : '',
+        resourcesNeeded: [...hostForm.resourcesNeeded],
+        needDescription: hostForm.needDescription.trim(),
+        needOtherResource:
+          hostForm.resourcesNeeded.indexOf('Other') !== -1
+            ? hostForm.needOtherResource.trim()
+            : '',
+        needOtherDescription:
+          hostForm.resourcesNeeded.indexOf('Other') !== -1
+            ? hostForm.needOtherDescription.trim()
+            : '',
         dateOptions,
         capacity: Number(hostForm.capacity) || 12,
         attendees: 0,
         createdAt: new Date().toISOString(),
+        publicationStatus: 'draft',
+        collaborationRequirementsCompleted: false,
       }
 
       await saveEventItem(nextEvent)
@@ -399,7 +709,7 @@ const App = () => {
       setHostForm(emptyHostForm)
       setEventFormFeedback({
         type: 'success',
-        message: `Event '${nextEvent.title}' has been published successfully!`,
+        message: `Event '${nextEvent.title}' was saved as Draft. Start Collaboration when you are ready to receive co-host requests. It is not visible to students until published.`,
       })
     } catch (error) {
       setEventFormFeedback({
@@ -425,10 +735,25 @@ const App = () => {
       throw new Error('Only the account that published this event can edit it.')
     }
 
-    const updatedEvent = await updateEventItem(event)
+    const updatedEvent = await updateEventItem({
+      ...event,
+      publicationStatus: event.publicationStatus ?? 'pending_collaboration',
+      collaborationRequirementsCompleted: event.collaborationRequirementsCompleted ?? false,
+    })
     setEvents((current) =>
       current.map((item) => (item.id === updatedEvent.id ? updatedEvent : item)),
     )
+  }
+
+  const handlePublishEvent = async (event: EventItem) => {
+    if (!authUserId || activeProfile?.profileType !== 'organization') {
+      throw new Error('An organization profile is required to publish events.')
+    }
+    if (event.hostOwnerId !== authUserId || event.hostId !== activeProfile.id) {
+      throw new Error('Only the account that published this event can publish it.')
+    }
+
+    await publishEvent(event.id)
   }
 
   const handleDeleteEvent = async (event: EventItem) => {
@@ -446,10 +771,11 @@ const App = () => {
   const handleJoinRequest = async (
     eventItem: EventItem,
     requestKind: 'participation' | 'cohost',
-  ) => {
+    coHostDetails?: CoHostRequestDetails,
+  ): Promise<boolean> => {
     if (!activeProfile || !authUserId || activeProfile.ownerId !== authUserId) {
       setErrorMessage('Create a profile before requesting to join an event.')
-      return
+      return false
     }
 
     if (
@@ -457,7 +783,7 @@ const App = () => {
       (requestKind === 'cohost' && activeProfile.profileType !== 'organization')
     ) {
       setErrorMessage('Switch to the matching profile type to submit this request.')
-      return
+      return false
     }
 
     if (
@@ -465,27 +791,72 @@ const App = () => {
       eventItem.hostOwnerId === activeProfile.ownerId
     ) {
       setErrorMessage('You cannot request to join an event hosted by your account.')
-      return
+      return false
     }
 
     if (eventItem.audience === 'organizations' && activeProfile.profileType !== 'organization') {
       setErrorMessage('This event is open to organizations only.')
-      return
+      return false
+    }
+
+    if (
+      requestKind === 'participation' &&
+      eventItem.publicationStatus !== 'published'
+    ) {
+      setErrorMessage('Participation requests are only available for published events.')
+      return false
+    }
+
+    if (
+      requestKind === 'cohost' &&
+      eventItem.publicationStatus !== 'pending_collaboration'
+    ) {
+      setErrorMessage('Co-hosting requests are only available while an event is pending collaboration.')
+      return false
+    }
+
+    if (requestKind === 'cohost' && !coHostDetails) {
+      setErrorMessage('Select the resources your organization can provide before submitting.')
+      return false
+    }
+
+    const hostNeeds = eventItem.resourcesNeeded ?? []
+    const resourcesProvided = coHostDetails?.resourcesProvided ?? []
+    if (
+      requestKind === 'cohost' &&
+      ((!coHostDetails?.contributionDescription.trim()) ||
+        (hostNeeds.length > 0 &&
+          (resourcesProvided.length === 0 ||
+            resourcesProvided.some((resource) => hostNeeds.indexOf(resource) === -1))) ||
+        (hostNeeds.length === 0 &&
+          resourcesProvided.some((resource) => resource !== 'General contribution')))
+    ) {
+      setErrorMessage('Provide a description and select only resources requested by the host.')
+      return false
     }
 
     const draft = requestDrafts[eventItem.id] ?? { ...emptyDraft }
     const selectedDates = draft.dates.length > 0 ? draft.dates : eventItem.dateOptions.slice(0, 1)
     const attendeeCount =
-      activeProfile.profileType === 'student' ? 1 : Number(draft.attendeeCount) || 1
+      requestKind === 'participation' ? 1 : 0
+    const estimatedAttendees = coHostDetails?.estimatedAttendees
+    if (
+      requestKind === 'cohost' &&
+      estimatedAttendees !== undefined &&
+      (!Number.isInteger(estimatedAttendees) || estimatedAttendees < 1)
+    ) {
+      setErrorMessage('Estimated attendance must be a positive whole number.')
+      return false
+    }
     if (selectedDates.length === 0) {
       setErrorMessage('Choose at least one date before sending your request.')
-      return
+      return false
     }
 
     const openSpots = eventItem.capacity - eventItem.attendees
     if (requestKind === 'participation' && attendeeCount > openSpots) {
       setErrorMessage(`Only ${openSpots} spots remain for this event.`)
-      return
+      return false
     }
 
     const requestId = createEventRequestId(
@@ -494,9 +865,16 @@ const App = () => {
       activeProfile.id,
       requestKind,
     )
-    if (eventRequests.some((request) => request.id === requestId)) {
+    if (
+      eventRequests.some((request) => request.id === requestId) ||
+      completedRequestIdsRef.current.has(requestId)
+    ) {
       setErrorMessage('A request for this event has already been sent from this profile.')
-      return
+      return false
+    }
+    if (pendingRequestIdsRef.current.has(requestId)) {
+      setErrorMessage('Your request is already being submitted.')
+      return false
     }
 
     const newRequest: EventRequest = {
@@ -518,10 +896,19 @@ const App = () => {
           : draft.message.trim() || 'Interested in joining this event.',
       status: 'pending',
       createdAt: new Date().toISOString(),
+      ...(requestKind === 'cohost'
+        ? {
+            resourcesProvided,
+            contributionDescription: coHostDetails?.contributionDescription.trim() ?? '',
+            ...(estimatedAttendees === undefined ? {} : { estimatedAttendees }),
+          }
+        : {}),
     }
 
+    pendingRequestIdsRef.current.add(requestId)
     try {
       await saveEventRequest(newRequest)
+      completedRequestIdsRef.current.add(requestId)
       setRequestDrafts((current) => ({
         ...current,
         [eventItem.id]: { ...emptyDraft },
@@ -532,28 +919,61 @@ const App = () => {
           : `Your participation request for ${eventItem.title} has been sent.`,
       )
       setErrorMessage(null)
+      return true
+    } catch (error) {
+      const errorCode =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        typeof error.code === 'string'
+          ? error.code
+          : 'unknown'
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'object' &&
+              error !== null &&
+              'message' in error &&
+              typeof error.message === 'string'
+            ? error.message
+            : 'Unknown Firebase error'
+      console.error('Failed to submit event request to Firebase.', {
+        code: errorCode,
+        message: errorMessage,
+        error,
+      })
+      setErrorMessage(
+        `Could not send your ${requestKind === 'cohost' ? 'co-hosting' : 'participation'} request. Firebase error ${errorCode}: ${errorMessage}. Please try again or contact support with this error code.`,
+      )
+      return false
+    } finally {
+      pendingRequestIdsRef.current.delete(requestId)
+    }
+  }
+
+  const markNotificationRead = (noticeId: string) => {
+    try {
+      const nextIds = readNotificationIds.indexOf(noticeId) !== -1
+        ? readNotificationIds
+        : [...readNotificationIds, noticeId]
+      localStorage.setItem(readNotificationsStorageKey, JSON.stringify(nextIds))
+      setReadNotificationIds(nextIds)
     } catch (error) {
       setErrorMessage(
-        `Could not send your request: ${
-          error instanceof Error ? error.message : 'unknown Firebase error'
+        `Could not save inbox read state: ${
+          error instanceof Error ? error.message : 'unknown storage error'
         }`,
       )
     }
   }
 
-  const markNotificationRead = (noticeId: string) => {
-    setReadNotificationIds((current) =>
-      current.indexOf(noticeId) !== -1 ? current : [...current, noticeId],
-    )
-  }
-
   const handleResolveRequest = async (
     eventRequest: EventRequest,
     status: Extract<EventRequest['status'], 'accepted' | 'declined'>,
-  ) => {
+  ): Promise<boolean> => {
     if (!authUserId || activeProfile?.ownerId !== authUserId) {
       setErrorMessage('Sign in to the event host account before responding to requests.')
-      return
+      return false
     }
     if (
       activeProfile.profileType !== 'organization' ||
@@ -561,29 +981,60 @@ const App = () => {
       eventRequest.hostProfileId !== activeProfile.id
     ) {
       setErrorMessage('You are not authorized to respond to this request.')
-      return
+      return false
     }
 
     try {
       await resolveEventRequest(eventRequest, status, authUserId, activeProfile.id)
+      setEventRequests((current) =>
+        current.map((request) =>
+          request.id === eventRequest.id && request.requestType === eventRequest.requestType
+            ? {
+                ...request,
+                status,
+                resolvedAt: new Date().toISOString(),
+                resolvedByProfileId: activeProfile.id,
+              }
+            : request,
+        ),
+      )
       setStatusMessage(
         `The ${eventRequest.requestType === 'cohost' ? 'co-hosting' : 'participation'} request was ${status}.`,
       )
       setErrorMessage(null)
+      return true
     } catch (error) {
       setErrorMessage(
         `Could not ${status === 'accepted' ? 'accept' : 'decline'} the request: ${
           error instanceof Error ? error.message : 'unknown Firebase error'
         }`,
       )
+      return false
     }
   }
 
   const handleSelectProfile = (profileId: string) => {
     const selectedProfile = profiles.find((profile) => profile.id === profileId)
     if (!selectedProfile) return
-    saveActiveProfileId(selectedProfile.id)
-    setActiveProfile(selectedProfile)
+    try {
+      const isOwnedProfile = authUserId
+        ? selectedProfile.ownerId === authUserId
+        : selectedProfile.ownerId === getLocalDeviceId()
+      if (!isOwnedProfile) {
+        setErrorMessage('You can only switch to profiles owned by the active account.')
+        return
+      }
+      saveActiveProfileId(selectedProfile.id)
+      setActiveProfile(selectedProfile)
+      setCurrentPage('dashboard')
+      setErrorMessage(null)
+    } catch (error) {
+      setErrorMessage(
+        `Could not save your active profile selection: ${
+          error instanceof Error ? error.message : 'unknown storage error'
+        }`,
+      )
+    }
   }
 
   const activeProfileRequests = activeProfile?.ownerId === authUserId
@@ -618,11 +1069,18 @@ const App = () => {
           : `${requestLabel} request ${statusLabel.toLowerCase()} for ${request.eventTitle}`,
       message: isOutgoing
         ? `Your request for ${request.eventTitle} is ${request.status}.`
-        : `${request.requesterName} requested ${request.attendeeCount} ${
-            request.attendeeCount === 1 ? 'spot' : 'spots'
-          } for ${request.eventTitle}.`,
+        : request.requestType === 'cohost'
+          ? `${request.requesterName} sent a co-hosting request for ${request.eventTitle} with estimated attendance ${
+              request.estimatedAttendees ??
+              (request.attendeeCount > 0 ? request.attendeeCount : 'Not sure yet')
+            }.`
+          : `${request.requesterName} requested ${request.attendeeCount} ${
+              request.attendeeCount === 1 ? 'spot' : 'spots'
+            } for ${request.eventTitle}.`,
       type: isOutgoing ? 'outgoing' : 'incoming',
       relatedEventId: request.eventId,
+      requestId: request.id,
+      requestType: request.requestType,
       createdAt: request.createdAt,
       isRead: readNotificationIds.indexOf(request.id) !== -1,
     }
@@ -635,17 +1093,41 @@ const App = () => {
     }))
   }
 
-  const totalOpenSpots = events.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0)
+  const publishedEvents = events.filter((event) => event.publicationStatus === 'published')
+  const totalOpenSpots = publishedEvents.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0)
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#events">Skip to events</a>
+      <a className="skip-link" href="#events" onClick={() => setCurrentPage('events')}>Skip to events</a>
       <header className="site-header">
         <div className="header-inner">
-          <a href="#" className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
-          <nav aria-label="Main navigation"><a href="#events">Find an event</a><a href={activeProfile?.profileType === 'organization' ? '#host' : '#profile'}>Host an event</a></nav>
-          <button type="button" onClick={handleContinueWithoutEmail} className="button-secondary account-button">{authUserId ? 'Account saved on this device' : 'Continue without email'}</button>
+          <a href="#" onClick={() => setCurrentPage('dashboard')} className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
+          <div className="flex flex-wrap gap-6 text-sm">
+            <a href="#events" onClick={() => setCurrentPage('events')}>Find an event</a>
+            <a href={activeProfile?.profileType === 'organization' ? '#host' : '#profile'} onClick={() => setCurrentPage(activeProfile?.profileType === 'organization' ? 'dashboard' : 'profile')}>Host an event</a>
+          </div>
+          <button type="button" onClick={() => setCurrentPage('profile')} className="button-secondary account-button">Account</button>
         </div>
+        <nav
+          aria-label="Main navigation"
+          className="app-navigation mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-6 pb-4"
+        >
+          {(['dashboard', 'events', 'requests', 'inbox', 'discover', 'profile'] as const).map((page) => (
+            <button
+              key={page}
+              type="button"
+              aria-current={currentPage === page ? 'page' : undefined}
+              onClick={() => setCurrentPage(page)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold capitalize transition ${
+                currentPage === page
+                  ? 'bg-gradient-to-r from-blue-600 to-violet-600 text-white'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-blue-50'
+              }`}
+            >
+              {page === 'discover' ? 'Discover Clubs' : page}
+            </button>
+          ))}
+        </nav>
       </header>
 
       <main className="main-content">
@@ -654,10 +1136,10 @@ const App = () => {
             <p className="eyebrow">CoHost</p>
             <h2 id="welcome-title">Use CoHost now</h2>
             <p className="welcome-copy">Find an event to join or plan one with another club.</p>
-            <a className="text-link" href="#events">Browse events</a>
+            <a className="text-link" href="#events" onClick={() => setCurrentPage('events')}>Browse events</a>
           </div>
           <dl className="community-stats" aria-label="Community event activity">
-            <div><dt>Events on the board</dt><dd>{events.length}</dd></div>
+            <div><dt>Events on the board</dt><dd>{publishedEvents.length}</dd></div>
             <div><dt>Open places</dt><dd>{totalOpenSpots}</dd></div>
             <div><dt>Your profiles</dt><dd>{profiles.length}</dd></div>
           </dl>
@@ -675,53 +1157,143 @@ const App = () => {
             {errorMessage}
           </div>
         ) : null}
-        {activeProfile?.profileType === 'organization' ? (
-          <OrganizationDashboard
+        {currentPage === 'discover' ? (
+          <ClubDiscovery
+            organizations={publicOrganizations}
+            events={events}
+            activeProfile={activeProfile}
+            authUserId={authUserId}
+            requestDrafts={requestDrafts}
+            isLoading={isDirectoryLoading}
+            error={directoryError}
+            onDraftChange={handleRequestDraftChange}
+            onDatesChange={handleRequestDatesChange}
+            onRequest={handleJoinRequest}
+          />
+        ) : currentPage === 'requests' ? (
+          <RequestsPage
+            requests={activeProfileRequests}
+            events={events}
+            profile={activeProfile}
+            selection={requestSelection}
+            onSelectionHandled={() => setRequestSelection(null)}
+            onResolveRequest={handleResolveRequest}
+          />
+        ) : currentPage === 'profile' ? (
+          <ProfilePage
             activeProfile={activeProfile}
             profiles={profiles}
             authUserId={authUserId}
-            events={events}
-            inbox={inbox}
-            collaborationRequests={activeProfileRequests}
+            authDisplayName={authDisplayName}
+            authPhotoUrl={authPhotoUrl}
+            authEmail={authEmail}
+            isGoogleAccount={isGoogleAccount}
+            isAnonymousSession={isAnonymousSession}
             profileForm={profileForm}
+            editProfileForm={editProfileForm}
+            isCreatingProfile={isCreatingProfile}
+            onSelectProfile={(profileId) => {
+              handleSelectProfile(profileId)
+              const profile = profiles.find((item) => item.id === profileId)
+              setEditProfileForm(
+                profile
+                  ? {
+                      name: profile.name,
+                      profileType: profile.profileType,
+                      focus: profile.focus,
+                      location: profile.location,
+                      description: profile.description,
+                      interests:
+                        profile.interests ??
+                        (profile.profileType === 'organization' ? [profile.focus] : []),
+                      eventTypes: profile.eventTypes ?? [],
+                      availableResources: profile.availableResources ?? [],
+                      collaborationPreferences: profile.collaborationPreferences ?? [],
+                      directoryVisible: profile.directoryVisible ?? false,
+                    }
+                  : emptyProfileForm,
+              )
+            }}
+            onCreateProfileStart={() => setProfileForm(emptyProfileForm)}
+            onCreateProfile={handleCreateProfile}
+            onProfileFieldChange={handleProfileFieldChange}
+            onEditProfileStart={() => {
+              if (!activeProfile) return
+              setEditProfileForm({
+                name: activeProfile.name,
+                profileType: activeProfile.profileType,
+                focus: activeProfile.focus,
+                location: activeProfile.location,
+                description: activeProfile.description,
+                interests:
+                  activeProfile.interests ??
+                  (activeProfile.profileType === 'organization' ? [activeProfile.focus] : []),
+                eventTypes: activeProfile.eventTypes ?? [],
+                availableResources: activeProfile.availableResources ?? [],
+                collaborationPreferences: activeProfile.collaborationPreferences ?? [],
+                directoryVisible: activeProfile.directoryVisible ?? false,
+              })
+            }}
+            onEditProfileSave={handleUpdateProfile}
+            onEditProfileFieldChange={handleEditProfileFieldChange}
+            onOrganizationSettingsChange={(field, value) =>
+              setEditProfileForm((current) => ({ ...current, [field]: value }))
+            }
+            onContinueWithoutEmail={() => void handleContinueWithoutEmail()}
+            onGoogleSignIn={() => void handleGoogleSignIn()}
+            onSignOut={() => void handleSignOut()}
+          />
+        ) : currentPage === 'inbox' ? (
+          <section className="mx-auto max-w-3xl" aria-label="Inbox page">
+            <InboxPanel
+              inbox={inbox}
+              profileId={activeProfile?.id ?? null}
+              onMarkRead={markNotificationRead}
+              onViewRequest={(notice) => {
+                if (notice.requestId && notice.requestType) {
+                  setRequestSelection({
+                    id: notice.requestId,
+                    requestType: notice.requestType,
+                  })
+                }
+                setCurrentPage('requests')
+              }}
+            />
+          </section>
+        ) : activeProfile?.profileType === 'organization' ? (
+          <OrganizationDashboard
+            activeProfile={activeProfile}
+            events={events}
+            eventRequests={eventRequests}
             hostForm={hostForm}
             requestDrafts={requestDrafts}
+            view={currentPage === 'events' ? 'events' : 'dashboard'}
             eventFormFeedback={eventFormFeedback}
             eventFeedbackRef={eventFeedbackRef}
             isPublishing={isPublishing}
-            onSelectProfile={handleSelectProfile}
-            onCreateProfile={handleCreateProfile}
-            onProfileFieldChange={handleProfileFieldChange}
             onHostFieldChange={handleHostFieldChange}
+            onHostResourceFieldChange={handleHostResourceFieldChange}
             onHostRangeChange={(startDate, endDate) => {
               setEventFormFeedback(null)
               setHostForm((current) => ({ ...current, startDate, endDate }))
             }}
             onHostEvent={handleHostEvent}
             onUpdateEvent={handleUpdateEvent}
+            onPublishEvent={handlePublishEvent}
             onDeleteEvent={handleDeleteEvent}
             onDraftChange={handleRequestDraftChange}
             onDatesChange={handleRequestDatesChange}
-            onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
-            onResolveRequest={(request, status) => handleResolveRequest(request, status)}
-            onMarkRead={markNotificationRead}
+            onRequest={handleJoinRequest}
           />
         ) : (
           <StudentDashboard
             activeProfile={activeProfile}
-            profiles={profiles}
-            authUserId={authUserId}
             events={events}
-            inbox={inbox}
-            profileForm={profileForm}
             requestDrafts={requestDrafts}
-            onSelectProfile={handleSelectProfile}
-            onCreateProfile={handleCreateProfile}
-            onProfileFieldChange={handleProfileFieldChange}
+            view={currentPage === 'events' ? 'events' : 'dashboard'}
             onDraftChange={handleRequestDraftChange}
             onDatesChange={handleRequestDatesChange}
-            onRequest={(eventItem, requestKind) => void handleJoinRequest(eventItem, requestKind)}
-            onMarkRead={markNotificationRead}
+            onRequest={handleJoinRequest}
           />
         )}
         <footer className="site-footer"><span>CoHost</span><a href="#">Back to top</a></footer>

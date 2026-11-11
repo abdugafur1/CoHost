@@ -1,5 +1,11 @@
 export type ProfileType = 'student' | 'organization'
 export type EventAudience = 'everyone' | 'organizations'
+export type EventPublicationStatus =
+  | 'draft'
+  | 'pending_collaboration'
+  | 'ready_to_publish'
+  | 'published'
+  | 'cancelled'
 
 export interface UserProfile {
   id: string
@@ -10,6 +16,23 @@ export interface UserProfile {
   location: string
   description: string
   createdAt: string
+  interests?: string[]
+  eventTypes?: string[]
+  availableResources?: string[]
+  collaborationPreferences?: string[]
+  directoryVisible?: boolean
+}
+
+export interface PublicOrganization {
+  profileId: string
+  name: string
+  description: string
+  focus: string
+  location: string
+  interests: string[]
+  eventTypes: string[]
+  availableResources: string[]
+  collaborationPreferences: string[]
 }
 
 export interface EventItem {
@@ -26,8 +49,27 @@ export interface EventItem {
   capacity: number
   attendees: number
   createdAt: string
+  publicationStatus?: EventPublicationStatus
+  collaborationRequirementsCompleted?: boolean
+  collaborationVersion?: 2
+  /** Historical registry: retained on legacy documents, never extended. */
+  cohostRequestIds?: string[]
+  confirmedCoHosts?: ConfirmedCoHost[]
+  resourcesOffered?: string[]
+  offerDescription?: string
+  offerOtherResource?: string
+  offerOtherDescription?: string
+  resourcesNeeded?: string[]
+  needDescription?: string
+  needOtherResource?: string
+  needOtherDescription?: string
   titleReservationId?: string
   lastAcceptedParticipationRequestId?: string
+}
+
+export interface ConfirmedCoHost {
+  profileId: string
+  name: string
 }
 
 export interface EventRequest {
@@ -46,6 +88,9 @@ export interface EventRequest {
   message: string
   status: 'pending' | 'accepted' | 'declined'
   createdAt: string
+  resourcesProvided?: string[]
+  contributionDescription?: string
+  estimatedAttendees?: number
   resolvedAt?: string
   resolvedByProfileId?: string
 }
@@ -57,6 +102,8 @@ export interface InboxNotice {
   message: string
   type: 'incoming' | 'outgoing'
   relatedEventId?: string
+  requestId?: string
+  requestType?: EventRequest['requestType']
   createdAt: string
   isRead: boolean
 }
