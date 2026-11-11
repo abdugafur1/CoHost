@@ -67,6 +67,11 @@ const profileForm = {
 }
 
 const sharedProps = {
+  page: 'events' as const,
+  discoveryEventId: null,
+  onSelectDiscoveryEvent: vi.fn(),
+  requests: [],
+  onResetHostForm: vi.fn(),
   profiles: [studentProfile],
   authUserId: 'owner-1',
   events: [],
@@ -83,7 +88,7 @@ const sharedProps = {
 }
 
 describe('role-specific dashboards', () => {
-  it('shows student event browsing and profile details without organization controls', () => {
+  it('shows student discovery without profile forms or organization controls', () => {
     render(
       <StudentDashboard
         activeProfile={studentProfile}
@@ -92,16 +97,15 @@ describe('role-specific dashboards', () => {
       />,
     )
 
-    expect(screen.getByText(/student dashboard/i)).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /jordan student/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /available community events/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /send participation request/i }))
-    expect(sharedProps.onRequest).toHaveBeenCalledWith(event, 'participation')
+    expect(screen.getByRole('heading', { name: /what would you like to find/i })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /jordan student/i })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: /your name/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /send participation request/i })).toBeNull()
     expect(screen.queryByRole('heading', { name: /publish an event/i })).toBeNull()
     expect(screen.queryByRole('heading', { name: /collaboration requests/i })).toBeNull()
   })
 
-  it('shows organization event publishing and a distinct co-host request action', () => {
+  it('keeps co-host discovery separate from publishing, management, and requests', () => {
     const onRequest = vi.fn()
     render(
       <OrganizationDashboard
@@ -132,14 +136,15 @@ describe('role-specific dashboards', () => {
       />,
     )
 
-    expect(screen.getByText(/organization dashboard/i)).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /publish an event/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /managing hosted events/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /collaboration requests/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /request to co-host/i }))
-    expect(onRequest).toHaveBeenCalledWith(event, 'cohost')
-    expect(screen.queryByRole('button', { name: /send participation request/i })).toBeNull()
-    expect(screen.getByText(/not verified administrator authorization/i)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /find an event to co-host/i })).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: /event title/i })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /managing hosted events/i })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /collaboration requests/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /show events/i }))
+    fireEvent.click(screen.getByRole('button', { name: /view campus arts night/i }))
+    fireEvent.click(screen.getByRole('button', { name: /join as a co-host/i }))
+    expect(screen.getByRole('heading', { name: /when can you make it/i })).toBeTruthy()
+    expect(onRequest).not.toHaveBeenCalled()
   })
 
   it('lets the host accept or decline an incoming event request', async () => {
@@ -151,6 +156,7 @@ describe('role-specific dashboards', () => {
         profiles={[organizationProfile]}
         events={[event]}
         collaborationRequests={[incomingRequest]}
+        page="inbox"
         hostForm={{
           title: '',
           location: '',
