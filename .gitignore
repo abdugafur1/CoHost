@@ -242,3 +242,18 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,react,firebase,macos,windows,node
+
+### Playwright E2E Testing ###
+playwright-report/
+test-results/
+playwright/.cache/
+
+### Firebase Emulator ###
+firebase-debug.log
+firestore-debug.log
+database-debug.log
+ui-debug.log
+*-debug.log
+
+### E2E Environment ###
+.env.e2e.local
