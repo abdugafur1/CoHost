@@ -12,9 +12,7 @@ import {
 import {
   collection,
   doc,
-  documentId,
   getDocs,
-  getDocsFromServer,
   onSnapshot,
   query,
   runTransaction,
@@ -23,7 +21,6 @@ import {
   writeBatch,
   type QueryConstraint,
 } from 'firebase/firestore'
-import { FirebaseError } from 'firebase/app'
 import type {
   ConfirmedCoHost,
   UserProfile,
@@ -567,8 +564,7 @@ export const saveEventRequest = async (request: EventRequest) => {
     ...(request.requestType === 'cohost'
       ? {
           resourcesProvided: request.resourcesProvided ?? [],
-          // The co-host rule requires nonblank text on a single line.
-          contributionDescription: (request.contributionDescription ?? '').replace(/[\r\n]+/g, ' ').trim(),
+          contributionDescription: request.contributionDescription ?? '',
           ...(request.estimatedAttendees === undefined
             ? {}
             : { estimatedAttendees: request.estimatedAttendees }),
@@ -579,53 +575,23 @@ export const saveEventRequest = async (request: EventRequest) => {
     await setDoc(requestRef, data)
     return
   }
-  try {
-    await runTransaction(db, async (transaction) => {
-      const eventRef = doc(db, 'events', request.eventId)
-      const snapshot = await transaction.get(eventRef)
-      if (!snapshot.exists()) throw new Error('This event no longer exists.')
-      const event = snapshot.data() as EventItem
-      if (event.publicationStatus !== 'pending_collaboration') {
-        throw new Error('This event is no longer accepting co-host requests. Refresh Events to see its current status.')
-      }
-      if (event.title !== request.eventTitle ||
-        event.hostId !== request.hostProfileId || event.hostOwnerId !== request.hostOwnerId) {
-        throw new Error('The event details have changed. Refresh Events and reopen the request form.')
-      }
-      if (request.availableDates.some((date) => event.dateOptions.indexOf(date) === -1)) {
-        throw new Error('Some selected dates are no longer available. Refresh Events and choose new dates.')
-      }
-      if (event.collaborationVersion === 2) {
-        const controlRef = doc(db, 'eventCollaboration', request.eventId)
-        const controlSnapshot = await transaction.get(controlRef)
-        if (!controlSnapshot.exists()) {
-          throw new Error('Collaboration tracking is unavailable for this event. Contact the event host for help.')
-        }
-        const c = controlSnapshot.data()
-        transaction.update(controlRef, {
-          pendingCount: c.pendingCount + 1, totalRequests: c.totalRequests + 1,
-          lastRequestId: request.id, revision: c.revision + 1,
-        })
-      }
-      transaction.set(requestRef, data)
-    })
-  } catch (error) {
-    if (error instanceof FirebaseError && error.code === 'permission-denied') {
-      // An owner-scoped query can return an empty result when a direct read of a missing request is denied.
-      const matchingRequests = await getDocsFromServer(query(
-        collection(db, 'cohostRequests'),
-        where('requesterOwnerId', '==', request.requesterOwnerId),
-        where(documentId(), '==', request.id),
-      )).catch(() => null)
-      if (matchingRequests && !matchingRequests.empty) {
-        throw Object.assign(
-          new Error('A request for this event has already been sent from this profile. Check Sent Requests for its status.'),
-          { cause: error },
-        )
-      }
+  await runTransaction(db, async (transaction) => {
+    const eventRef = doc(db, 'events', request.eventId)
+    const snapshot = await transaction.get(eventRef)
+    if (!snapshot.exists()) throw new Error('This event no longer exists.')
+    const event = snapshot.data() as EventItem
+    if (event.collaborationVersion === 2) {
+      const controlRef = doc(db, 'eventCollaboration', request.eventId)
+      const controlSnapshot = await transaction.get(controlRef)
+      if (!controlSnapshot.exists()) throw new Error('Request accounting is unavailable. Refresh and try again.')
+      const c = controlSnapshot.data()
+      transaction.update(controlRef, {
+        pendingCount: c.pendingCount + 1, totalRequests: c.totalRequests + 1,
+        lastRequestId: request.id, revision: c.revision + 1,
+      })
     }
-    throw error
-  }
+    transaction.set(requestRef, data)
+  })
 }
 
 export const resolveEventRequest = async (

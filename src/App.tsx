@@ -28,11 +28,11 @@ import {
   saveActiveProfileId,
   saveLocalProfiles,
 } from './services/localPersistence'
-import { OrganizationDashboard, OrganizationEvents } from './components/OrganizationDashboard'
+import { OrganizationDashboard } from './components/OrganizationDashboard'
 import { StudentDashboard } from './components/StudentDashboard'
 import { ProfilePage } from './components/ProfilePage'
 import { ClubDiscovery } from './components/ClubDiscovery'
-import { RequestsPage, type RequestPageSelection } from './components/RequestsPage'
+import { RequestsPage } from './components/RequestsPage'
 import { InboxPanel } from './components/DashboardComponents'
 import type {
   CoHostRequestDetails,
@@ -146,8 +146,10 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState<
     'dashboard' | 'events' | 'requests' | 'inbox' | 'profile' | 'discover'
   >('dashboard')
-  const [eventTarget, setEventTarget] = useState<{ id: string } | null>(null)
-  const [requestSelection, setRequestSelection] = useState<RequestPageSelection | null>(null)
+  const [requestSelection, setRequestSelection] = useState<{
+    id: string
+    requestType: EventRequest['requestType']
+  } | null>(null)
   const [publicOrganizations, setPublicOrganizations] = useState<PublicOrganization[]>([])
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(true)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
@@ -166,13 +168,6 @@ const App = () => {
   const creatingProfileRef = useRef(false)
   const [isCreatingProfile, setIsCreatingProfile] = useState(false)
   const eventFeedbackRef = useRef<HTMLParagraphElement>(null)
-
-  useEffect(() => {
-    if (currentPage !== 'events' || !eventTarget) return
-    const target = document.getElementById(eventTarget.id)
-    target?.focus({ preventScroll: true })
-    target?.scrollIntoView?.({ block: 'start' })
-  }, [currentPage, eventTarget])
 
   useEffect(() => {
     if (eventFormFeedback?.type === 'success') {
@@ -778,50 +773,51 @@ const App = () => {
     requestKind: 'participation' | 'cohost',
     coHostDetails?: CoHostRequestDetails,
   ): Promise<boolean> => {
-    const failRequest = (message: string): false => {
-      if (requestKind === 'cohost') throw new Error(message)
-      setErrorMessage(message)
-      return false
-    }
-
     if (!activeProfile || !authUserId || activeProfile.ownerId !== authUserId) {
-      return failRequest('Sign in and select a profile before submitting a request.')
+      setErrorMessage('Create a profile before requesting to join an event.')
+      return false
     }
 
     if (
       (requestKind === 'participation' && activeProfile.profileType !== 'student') ||
       (requestKind === 'cohost' && activeProfile.profileType !== 'organization')
     ) {
-      return failRequest('Switch to the matching profile type to submit this request.')
+      setErrorMessage('Switch to the matching profile type to submit this request.')
+      return false
     }
 
     if (
       eventItem.hostId === activeProfile.id ||
       eventItem.hostOwnerId === activeProfile.ownerId
     ) {
-      return failRequest('You cannot request to join an event hosted by your account.')
+      setErrorMessage('You cannot request to join an event hosted by your account.')
+      return false
     }
 
     if (eventItem.audience === 'organizations' && activeProfile.profileType !== 'organization') {
-      return failRequest('This event is open to organizations only.')
+      setErrorMessage('This event is open to organizations only.')
+      return false
     }
 
     if (
       requestKind === 'participation' &&
       eventItem.publicationStatus !== 'published'
     ) {
-      return failRequest('Participation requests are only available for published events.')
+      setErrorMessage('Participation requests are only available for published events.')
+      return false
     }
 
     if (
       requestKind === 'cohost' &&
       eventItem.publicationStatus !== 'pending_collaboration'
     ) {
-      return failRequest('This event is no longer accepting co-host requests. Refresh Events to see its current status.')
+      setErrorMessage('Co-hosting requests are only available while an event is pending collaboration.')
+      return false
     }
 
     if (requestKind === 'cohost' && !coHostDetails) {
-      return failRequest('Select the resources your organization can provide before submitting.')
+      setErrorMessage('Select the resources your organization can provide before submitting.')
+      return false
     }
 
     const hostNeeds = eventItem.resourcesNeeded ?? []
@@ -835,7 +831,8 @@ const App = () => {
         (hostNeeds.length === 0 &&
           resourcesProvided.some((resource) => resource !== 'General contribution')))
     ) {
-      return failRequest('Provide a description and select only resources requested by the host.')
+      setErrorMessage('Provide a description and select only resources requested by the host.')
+      return false
     }
 
     const draft = requestDrafts[eventItem.id] ?? { ...emptyDraft }
@@ -848,15 +845,18 @@ const App = () => {
       estimatedAttendees !== undefined &&
       (!Number.isInteger(estimatedAttendees) || estimatedAttendees < 1)
     ) {
-      return failRequest('Estimated attendance must be a positive whole number.')
+      setErrorMessage('Estimated attendance must be a positive whole number.')
+      return false
     }
     if (selectedDates.length === 0) {
-      return failRequest('Choose at least one date before sending your request.')
+      setErrorMessage('Choose at least one date before sending your request.')
+      return false
     }
 
     const openSpots = eventItem.capacity - eventItem.attendees
     if (requestKind === 'participation' && attendeeCount > openSpots) {
-      return failRequest(`Only ${openSpots} spots remain for this event.`)
+      setErrorMessage(`Only ${openSpots} spots remain for this event.`)
+      return false
     }
 
     const requestId = createEventRequestId(
@@ -869,10 +869,12 @@ const App = () => {
       eventRequests.some((request) => request.id === requestId) ||
       completedRequestIdsRef.current.has(requestId)
     ) {
-      return failRequest('A request for this event has already been sent from this profile. Check Sent Requests for its status.')
+      setErrorMessage('A request for this event has already been sent from this profile.')
+      return false
     }
     if (pendingRequestIdsRef.current.has(requestId)) {
-      return failRequest('Your request is already being submitted.')
+      setErrorMessage('Your request is already being submitted.')
+      return false
     }
 
     const newRequest: EventRequest = {
@@ -940,22 +942,10 @@ const App = () => {
         message: errorMessage,
         error,
       })
-      if (requestKind === 'cohost') {
-        switch (errorCode) {
-          case 'permission-denied':
-            return failRequest('Firestore denied permission to send this request. Refresh Events and verify that co-hosting is still open and you’re using the correct organization profile. If it still fails, contact support with code permission-denied.')
-          case 'unavailable':
-          case 'deadline-exceeded':
-            return failRequest('Could not reach Firestore. Check your connection and try again.')
-          case 'unauthenticated':
-            return failRequest('Your session has expired. Sign in again before sending the request.')
-          default:
-            return failRequest(errorMessage === 'Unknown Firebase error' ? 'Could not send this request. Try again or contact support.' : errorMessage)
-        }
-      }
-      return failRequest(
-        `Could not send your participation request. Firebase error ${errorCode}: ${errorMessage}. Please try again or contact support with this error code.`,
+      setErrorMessage(
+        `Could not send your ${requestKind === 'cohost' ? 'co-hosting' : 'participation'} request. Firebase error ${errorCode}: ${errorMessage}. Please try again or contact support with this error code.`,
       )
+      return false
     } finally {
       pendingRequestIdsRef.current.delete(requestId)
     }
@@ -1067,19 +1057,20 @@ const App = () => {
     const isOutgoing =
       request.requesterOwnerId === authUserId &&
       request.requesterProfileId === activeProfile?.id
+    const requestLabel = request.requestType === 'cohost' ? 'Co-hosting' : 'Participation'
+    const statusLabel = request.status[0].toUpperCase() + request.status.slice(1)
     return {
       id: request.id,
       profileId: activeProfile?.id ?? '',
-      eventTitle: request.eventTitle,
-      status: request.status,
+      title: isOutgoing
+        ? `${requestLabel} request ${statusLabel.toLowerCase()}`
+        : request.status === 'pending'
+          ? `New ${requestLabel.toLowerCase()} request for ${request.eventTitle}`
+          : `${requestLabel} request ${statusLabel.toLowerCase()} for ${request.eventTitle}`,
       message: isOutgoing
-        ? {
-            pending: 'Your request is waiting for the host to review it.',
-            accepted: 'The host approved your request.',
-            declined: 'The host declined your request.',
-          }[request.status]
+        ? `Your request for ${request.eventTitle} is ${request.status}.`
         : request.requestType === 'cohost'
-          ? `${request.requesterName} offered to co-host. Estimated attendance: ${
+          ? `${request.requesterName} sent a co-hosting request for ${request.eventTitle} with estimated attendance ${
               request.estimatedAttendees ??
               (request.attendeeCount > 0 ? request.attendeeCount : 'Not sure yet')
             }.`
@@ -1091,7 +1082,6 @@ const App = () => {
       requestId: request.id,
       requestType: request.requestType,
       createdAt: request.createdAt,
-      resolvedAt: request.resolvedAt,
       isRead: readNotificationIds.indexOf(request.id) !== -1,
     }
   })
@@ -1105,32 +1095,16 @@ const App = () => {
 
   const publishedEvents = events.filter((event) => event.publicationStatus === 'published')
   const totalOpenSpots = publishedEvents.reduce((sum, event) => sum + Math.max(event.capacity - event.attendees, 0), 0)
-  const isOrganization = activeProfile?.profileType === 'organization'
-
-  const openEvents = (target?: string) => {
-    setEventTarget(target ? { id: target } : null)
-    setCurrentPage('events')
-  }
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href={isOrganization ? '#hosted-events-heading' : '#events'} onClick={(click) => {
-        if (isOrganization) click.preventDefault()
-        openEvents(isOrganization ? 'hosted-events-heading' : undefined)
-      }}>Skip to events</a>
+      <a className="skip-link" href="#events" onClick={() => setCurrentPage('events')}>Skip to events</a>
       <header className="site-header">
         <div className="header-inner">
           <a href="#" onClick={() => setCurrentPage('dashboard')} className="wordmark" aria-label="CoHost home"><span className="brand-symbol" aria-hidden="true">co.</span><h1>CoHost</h1></a>
           <div className="flex flex-wrap gap-6 text-sm">
-            <a href="#events" onClick={() => openEvents()}>Find an event</a>
-            <a href={isOrganization ? '#host' : '#profile'} onClick={(click) => {
-              if (isOrganization) {
-                click.preventDefault()
-                openEvents('host')
-              } else {
-                setCurrentPage('profile')
-              }
-            }}>Host an event</a>
+            <a href="#events" onClick={() => setCurrentPage('events')}>Find an event</a>
+            <a href={activeProfile?.profileType === 'organization' ? '#host' : '#profile'} onClick={() => setCurrentPage(activeProfile?.profileType === 'organization' ? 'dashboard' : 'profile')}>Host an event</a>
           </div>
           <button type="button" onClick={() => setCurrentPage('profile')} className="button-secondary account-button">Account</button>
         </div>
@@ -1143,7 +1117,7 @@ const App = () => {
               key={page}
               type="button"
               aria-current={currentPage === page ? 'page' : undefined}
-              onClick={() => page === 'events' ? openEvents() : setCurrentPage(page)}
+              onClick={() => setCurrentPage(page)}
               className={`rounded-full px-4 py-2 text-sm font-semibold capitalize transition ${
                 currentPage === page
                   ? 'bg-gradient-to-r from-blue-600 to-violet-600 text-white'
@@ -1157,21 +1131,19 @@ const App = () => {
       </header>
 
       <main className="main-content">
-        {currentPage === 'dashboard' && !isOrganization ? (
-          <section className="welcome" aria-labelledby="welcome-title">
-            <div>
-              <p className="eyebrow">CoHost</p>
-              <h2 id="welcome-title">Use CoHost now</h2>
-              <p className="welcome-copy">Find an event to join or plan one with another club.</p>
-              <a className="text-link" href="#events" onClick={() => openEvents()}>Browse events</a>
-            </div>
-            <dl className="community-stats" aria-label="Community event activity">
-              <div><dt>Events on the board</dt><dd>{publishedEvents.length}</dd></div>
-              <div><dt>Open places</dt><dd>{totalOpenSpots}</dd></div>
-              <div><dt>Your profiles</dt><dd>{profiles.length}</dd></div>
-            </dl>
-          </section>
-        ) : null}
+        <section className="welcome" aria-labelledby="welcome-title">
+          <div>
+            <p className="eyebrow">CoHost</p>
+            <h2 id="welcome-title">Use CoHost now</h2>
+            <p className="welcome-copy">Find an event to join or plan one with another club.</p>
+            <a className="text-link" href="#events" onClick={() => setCurrentPage('events')}>Browse events</a>
+          </div>
+          <dl className="community-stats" aria-label="Community event activity">
+            <div><dt>Events on the board</dt><dd>{publishedEvents.length}</dd></div>
+            <div><dt>Open places</dt><dd>{totalOpenSpots}</dd></div>
+            <div><dt>Your profiles</dt><dd>{profiles.length}</dd></div>
+          </dl>
+        </section>
         {statusMessage ? (
           <div aria-live="polite" className="status-note">
             {statusMessage}
@@ -1288,24 +1260,14 @@ const App = () => {
               }}
             />
           </section>
-        ) : currentPage === 'dashboard' && activeProfile?.profileType === 'organization' ? (
-          <OrganizationDashboard
-            profile={activeProfile}
-            events={events}
-            requests={activeProfileRequests}
-            onOpenEvents={openEvents}
-            onOpenRequests={(selection) => {
-              setRequestSelection(selection ?? null)
-              setCurrentPage('requests')
-            }}
-          />
         ) : activeProfile?.profileType === 'organization' ? (
-          <OrganizationEvents
+          <OrganizationDashboard
             activeProfile={activeProfile}
             events={events}
             eventRequests={eventRequests}
             hostForm={hostForm}
             requestDrafts={requestDrafts}
+            view={currentPage === 'events' ? 'events' : 'dashboard'}
             eventFormFeedback={eventFormFeedback}
             eventFeedbackRef={eventFeedbackRef}
             isPublishing={isPublishing}
@@ -1318,7 +1280,6 @@ const App = () => {
             onHostEvent={handleHostEvent}
             onUpdateEvent={handleUpdateEvent}
             onPublishEvent={handlePublishEvent}
-            onResolveRequest={authUserId && activeProfile.ownerId === authUserId ? handleResolveRequest : undefined}
             onDeleteEvent={handleDeleteEvent}
             onDraftChange={handleRequestDraftChange}
             onDatesChange={handleRequestDatesChange}

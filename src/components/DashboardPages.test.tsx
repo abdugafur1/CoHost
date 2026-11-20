@@ -1,7 +1,7 @@
 import { createRef } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { OrganizationDashboard, OrganizationEvents } from './OrganizationDashboard'
+import { OrganizationDashboard } from './OrganizationDashboard'
 import { StudentDashboard } from './StudentDashboard'
 import { HostedEvents, InboxPanel } from './DashboardComponents'
 import { RequestsPage } from './RequestsPage'
@@ -85,33 +85,6 @@ const sharedProps = {
 }
 
 describe('role-specific dashboards', () => {
-  it('keeps the organization overview clear of other profiles’ events and outgoing or resolved requests', () => {
-    const sameAccountEvent = { ...event, hostOwnerId: organizationProfile.ownerId }
-    const outgoingRequest: EventRequest = {
-      ...incomingRequest,
-      hostOwnerId: sameAccountEvent.hostOwnerId,
-      hostProfileId: sameAccountEvent.hostId,
-      requesterProfileId: organizationProfile.id,
-      requesterOwnerId: organizationProfile.ownerId,
-      requestType: 'cohost',
-    }
-    render(
-      <OrganizationDashboard
-        profile={organizationProfile}
-        events={[sameAccountEvent]}
-        requests={[outgoingRequest, { ...incomingRequest, status: 'accepted' }]}
-        onOpenEvents={vi.fn()}
-        onOpenRequests={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText('Owned events').nextElementSibling).toHaveTextContent('0')
-    expect(screen.getByText('Pending requests').nextElementSibling).toHaveTextContent('0')
-    expect(screen.getByText('Ready to publish').nextElementSibling).toHaveTextContent('0')
-    expect(screen.getByText('You’re all caught up.')).toBeVisible()
-    expect(screen.queryByRole('link', { name: event.title })).toBeNull()
-  })
-
   it('does not render non-published events on the student dashboard', () => {
     render(
       <StudentDashboard
@@ -187,7 +160,7 @@ describe('role-specific dashboards', () => {
   it('shows organization event publishing and a distinct co-host request action', async () => {
     const onRequest = vi.fn().mockResolvedValue(true)
     render(
-      <OrganizationEvents
+      <OrganizationDashboard
         activeProfile={organizationProfile}
         {...sharedProps}
         events={[collaborationEvent]}
@@ -221,7 +194,7 @@ describe('role-specific dashboards', () => {
       />,
     )
 
-    expect(screen.queryByText(/organization dashboard/i)).toBeNull()
+    expect(screen.getByText(/organization dashboard/i)).toBeTruthy()
     expect(screen.getByRole('heading', { name: /create an event/i })).toBeTruthy()
     expect(screen.getByRole('heading', { name: /managing events/i })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: /collaboration requests/i })).toBeNull()
@@ -251,89 +224,8 @@ describe('hosted event management', () => {
     hostOwnerId: organizationProfile.ownerId,
   }
 
-  const openEventActions = () => fireEvent.click(screen.getByLabelText(`More actions for ${hostedEvent.title}`))
-
-  it.each([0, 1, 2])('shows the workspace with %i confirmed co-hosts', (count) => {
-    const confirmedCoHosts = [
-      { profileId: 'esport', name: 'Esport Club' },
-      { profileId: 'volunteer', name: 'Volunteer Club' },
-    ].slice(0, count)
-    render(
-      <HostedEvents
-        events={[{ ...hostedEvent, publicationStatus: 'pending_collaboration', confirmedCoHosts }]}
-        profile={organizationProfile}
-        onUpdate={vi.fn()}
-        onDelete={vi.fn()}
-      />,
-    )
-    const card = within(screen.getByRole('article', { name: hostedEvent.title }))
-    const workspace = within(card.getByRole('region', { name: /collaboration workspace/i }))
-    const readyMessage = 'All requests resolved · Ready to complete collaboration.'
-    expect(card.getByText('Pending Collaboration', { exact: true })).toBeVisible()
-    expect(card.getByRole('button', { name: 'Complete Collaboration' })).toBeEnabled()
-    expect(card.queryByText('Published', { exact: true })).toBeNull()
-    if (count === 0) {
-      expect(workspace.getByText('No co-hosts confirmed yet.')).toBeVisible()
-      expect(workspace.queryByText(readyMessage)).toBeNull()
-      expect(workspace.queryByRole('listitem')).toBeNull()
-    } else {
-      expect(workspace.getByText(`${count} Confirmed ${count === 1 ? 'Co-Host' : 'Co-Hosts'}`)).toBeVisible()
-      expect(workspace.getByText(readyMessage)).toBeVisible()
-      expect(workspace.getAllByRole('listitem')).toHaveLength(count)
-      for (const partner of confirmedCoHosts) {
-        expect(workspace.getByText(partner.name)).toBeVisible()
-      }
-      expect(workspace.getAllByText('Confirmed Co-Host')).toHaveLength(count)
-    }
-  })
-
-  it.each([
-    ['draft', 'Start Collaboration'],
-    ['pending_collaboration', 'Complete Collaboration'],
-    ['ready_to_publish', 'Publish'],
-    ['published', 'View Details'],
-    ['cancelled', 'View Details'],
-  ] as const)('shows %s with %s as the sole primary action', (publicationStatus, action) => {
-    render(
-      <HostedEvents
-        events={[{ ...hostedEvent, publicationStatus }]}
-        profile={organizationProfile}
-        onUpdate={vi.fn()}
-        onPublish={vi.fn()}
-        onDelete={vi.fn()}
-      />,
-    )
-    if (publicationStatus === 'cancelled') {
-      fireEvent.change(screen.getByRole('combobox', { name: /filter by status/i }), { target: { value: 'cancelled' } })
-    }
-    const card = within(screen.getByRole('article', { name: hostedEvent.title }))
-    expect(card.getAllByRole('button').filter((button) => button.classList.contains('button-primary')))
-      .toEqual([card.getByRole('button', { name: action })])
-    expect(card.getByText('Edit')).not.toBeVisible()
-    expect(card.getByText('Delete')).not.toBeVisible()
-    const overflow = card.getByLabelText(`More actions for ${hostedEvent.title}`)
-    fireEvent.click(overflow)
-    expect(card.getByRole('button', { name: 'Edit' })).toBeVisible()
-    expect(card.getByRole('button', { name: 'Delete' })).toBeVisible()
-    if (publicationStatus === 'cancelled') {
-      expect(card.queryByRole('button', { name: 'Cancel Event' })).toBeNull()
-    } else {
-      expect(card.getByRole('button', { name: 'Cancel Event' })).toBeVisible()
-    }
-    fireEvent.keyDown(card.getByRole('button', { name: 'Edit' }), { key: 'Escape' })
-    expect(overflow).toHaveFocus()
-    expect(card.getByText('Edit')).not.toBeVisible()
-
-    if (action !== 'View Details') fireEvent.click(overflow)
-    fireEvent.click(card.getByRole('button', { name: 'View Details' }))
-    expect(card.getByRole('region', { name: `Details for ${hostedEvent.title}` })).toBeVisible()
-  })
-
-  it.each([
-    { confirmedCoHosts: [], warn: true },
-    { confirmedCoHosts: [{ profileId: 'partner-profile', name: 'Volunteer Club' }], warn: false },
-  ])('requires explicit completion confirmation with confirmed co-hosts $confirmedCoHosts', async ({ confirmedCoHosts, warn }) => {
-    const pendingEvent = { ...hostedEvent, publicationStatus: 'pending_collaboration' as const, confirmedCoHosts }
+  it('requires explicit collaboration completion and confirmation before publishing', async () => {
+    const pendingEvent = { ...hostedEvent, publicationStatus: 'pending_collaboration' as const }
     const onUpdate = vi.fn().mockResolvedValue(undefined)
     render(
       <HostedEvents
@@ -345,16 +237,7 @@ describe('hosted event management', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /complete collaboration/i }))
-    const dialog = screen.getByRole('dialog')
-    const warning = 'No co-hosts have been confirmed for this event. Do you want to complete collaboration without a co-host?'
-    if (warn) {
-      expect(within(dialog).getByText(warning)).toBeVisible()
-      expect(dialog).toHaveAccessibleDescription(warning)
-    } else {
-      expect(within(dialog).queryByText(warning)).toBeNull()
-    }
-    expect(screen.getByRole('button', { name: /mark ready to publish/i })).toBeDisabled()
-    expect(onUpdate).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeTruthy()
     fireEvent.click(screen.getByRole('checkbox', { name: /confirm all necessary collaboration arrangements/i }))
     fireEvent.click(screen.getByRole('button', { name: /mark ready to publish/i }))
     await waitFor(() =>
@@ -442,11 +325,9 @@ describe('hosted event management', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }))
-    expect(within(screen.getByRole('dialog')).getByText(/volunteer club/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /publish event/i }))
+    expect(screen.getByText(/volunteer club/i)).toBeTruthy()
     expect(onUpdate).not.toHaveBeenCalled()
-    expect(onPublish).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: /confirm publish/i })).toBeDisabled()
     fireEvent.click(screen.getByRole('checkbox', { name: /i confirm these event details/i }))
     fireEvent.click(screen.getByRole('button', { name: /confirm publish/i }))
 
@@ -486,8 +367,7 @@ describe('hosted event management', () => {
     const inboxNotice = (request: EventRequest, type: 'incoming' | 'outgoing') => ({
       id: request.id,
       profileId: organizationProfile.id,
-      eventTitle: request.eventTitle,
-      status: request.status,
+      title: `${request.requestType} request`,
       message: request.message,
       type,
       relatedEventId: request.eventId,
@@ -513,47 +393,6 @@ describe('hosted event management', () => {
       expect(onMarkRead).toHaveBeenCalledWith(incomingRequest.id)
       expect(screen.queryByRole('dialog')).toBeNull()
       expect(onViewRequest).toHaveBeenCalledWith(inboxNotice(incomingRequest, 'incoming'))
-    })
-
-    it('prioritizes pending incoming requests and filters unread notices from the current state', () => {
-      const pending = inboxNotice({ ...incomingRequest, requestType: 'cohost' }, 'incoming')
-      const accepted = {
-        ...pending, id: 'accepted', eventTitle: 'Accepted event', status: 'accepted' as const,
-        resolvedAt: '2026-10-15T10:00:00.000Z', type: 'outgoing' as const, isRead: true,
-      }
-      const declined = {
-        ...pending, id: 'declined', eventTitle: 'Declined event', status: 'declined' as const,
-        resolvedAt: '2026-10-16T10:00:00.000Z', type: 'outgoing' as const,
-      }
-      const onMarkRead = vi.fn()
-      const props = { profileId: organizationProfile.id, onMarkRead, onViewRequest: vi.fn() }
-      const { rerender } = render(<InboxPanel inbox={[accepted, declined, pending]} {...props} />)
-
-      const cards = screen.getAllByRole('article')
-      expect(cards).toHaveLength(3)
-      expect(cards[0]).toHaveAccessibleName(pending.eventTitle)
-      expect(within(cards[0]).getByText('Needs review')).toBeVisible()
-      expect(within(cards[0]).getByText('incoming')).toBeVisible()
-      expect(within(cards[0]).getByText('pending')).toBeVisible()
-      expect(within(cards[0]).getByText('Co-hosting request')).toBeVisible()
-      expect(within(cards[1]).getByText('declined')).toBeVisible()
-      expect(within(cards[2]).getByText('accepted')).toBeVisible()
-      expect(within(cards[2]).getByText('outgoing')).toBeVisible()
-      expect(cards[1].querySelector('time')).toHaveAttribute('datetime', declined.resolvedAt)
-      expect(screen.getByRole('status')).toHaveTextContent('2 unread')
-
-      const unread = screen.getByRole('button', { name: 'Unread' })
-      fireEvent.click(unread)
-      expect(unread).toHaveAttribute('aria-pressed', 'true')
-      expect(screen.queryByRole('article', { name: accepted.eventTitle })).toBeNull()
-      fireEvent.click(within(cards[0]).getByRole('button', { name: 'Mark read' }))
-      expect(onMarkRead).toHaveBeenCalledWith(pending.id)
-      expect(unread).toHaveFocus()
-      rerender(<InboxPanel inbox={[accepted, declined, { ...pending, isRead: true }]} {...props} />)
-      expect(screen.queryByRole('article', { name: pending.eventTitle })).toBeNull()
-      expect(screen.getByRole('status')).toHaveTextContent('1 unread')
-      fireEvent.click(screen.getByRole('button', { name: 'All' }))
-      expect(screen.getByRole('article', { name: pending.eventTitle })).toBeVisible()
     })
   })
 
@@ -582,7 +421,6 @@ describe('hosted event management', () => {
         onDelete={vi.fn()}
       />,
     )
-    openEventActions()
     fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
     expect(screen.getByText(/select at least one resource you offer/i)).toBeTruthy()
@@ -646,7 +484,6 @@ describe('hosted event management', () => {
       />,
     )
 
-    openEventActions()
     fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     fireEvent.change(screen.getByRole('textbox', { name: /edit title/i }), {
       target: { value: 'Updated Arts Night' },
@@ -690,7 +527,6 @@ describe('hosted event management', () => {
       />,
     )
 
-    openEventActions()
     fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
     fireEvent.change(screen.getByRole('textbox', { name: /edit title/i }), {
       target: { value: 'Updated Arts Night' },
@@ -721,7 +557,6 @@ describe('hosted event management', () => {
       />,
     )
 
-    openEventActions()
     fireEvent.click(screen.getByRole('button', { name: /^delete$/i }))
     expect(confirmSpy).toHaveBeenCalledWith(
       'Delete "Campus Arts Night"? This will permanently remove the event.',
@@ -729,7 +564,6 @@ describe('hosted event management', () => {
     expect(onDelete).not.toHaveBeenCalled()
 
     confirmSpy.mockReturnValue(true)
-    openEventActions()
     fireEvent.click(screen.getByRole('button', { name: /^delete$/i }))
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith(hostedEvent))
     expect((await screen.findByRole('status')).textContent).toBe(
@@ -750,7 +584,6 @@ describe('hosted event management', () => {
 
     expect(screen.queryByRole('button', { name: /^edit$/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^delete$/i })).toBeNull()
-    expect(screen.queryByLabelText(`More actions for ${hostedEvent.title}`)).toBeNull()
     expect(screen.getByText(/only the account that published this event/i)).toBeTruthy()
   })
 

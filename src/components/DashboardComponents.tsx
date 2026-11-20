@@ -1,7 +1,6 @@
 import { useRef, useState, type ChangeEvent, type FormEvent, type RefObject } from 'react'
 import CalendarPicker from './CalendarPicker'
-import type { EventItem, EventPublicationStatus, EventRequest, InboxNotice, ProfileType, UserProfile } from '../types'
-import { formatDateLabel, managedEventId, publicationStatusLabels } from './eventManagement'
+import type { EventItem, EventRequest, InboxNotice, ProfileType, UserProfile } from '../types'
 
 export interface ProfileFormValues {
   name: string
@@ -485,113 +484,73 @@ interface InboxPanelProps {
   onViewRequest: (notice: InboxNotice) => void
 }
 
-const requiresInboxAction = (notice: InboxNotice) =>
-  notice.type === 'incoming' && notice.status === 'pending'
-
-const inboxTimestamp = (notice: InboxNotice) => notice.resolvedAt ?? notice.createdAt
-
 export const InboxPanel = ({
   inbox,
   profileId,
   onMarkRead,
   onViewRequest,
 }: InboxPanelProps) => {
-  const [filter, setFilter] = useState<'all' | 'unread'>('all')
-  const activeFilterRef = useRef<HTMLButtonElement>(null)
   const profileInbox = inbox.filter((notice) => notice.profileId === profileId)
-  const unreadCount = profileInbox.filter((notice) => !notice.isRead).length
-  const visibleNotices = profileInbox
-    .filter((notice) => filter === 'all' || !notice.isRead)
-    .sort((first, second) =>
-      Number(requiresInboxAction(second)) - Number(requiresInboxAction(first)) ||
-      Date.parse(inboxTimestamp(second)) - Date.parse(inboxTimestamp(first)),
-    )
 
   return (
-    <section className="panel inbox-panel" aria-labelledby="inbox-heading">
-      <div className="inbox-toolbar">
-        <div className="inbox-title">
-          <h2 id="inbox-heading">Inbox</h2>
-          <span className="inbox-unread-count" role="status">{unreadCount} unread</span>
-        </div>
-        <div className="inbox-filters" role="group" aria-label="Filter notifications">
-          {(['all', 'unread'] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              ref={filter === option ? activeFilterRef : undefined}
-              aria-pressed={filter === option}
-              onClick={() => setFilter(option)}
-            >
-              {option === 'all' ? 'All' : 'Unread'}
-            </button>
-          ))}
-        </div>
+    <section className="panel">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-2xl font-bold text-stone-900">Inbox</h2>
+        <span className="border border-stone-300 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-600">
+          {profileInbox.filter((entry) => !entry.isRead).length} new
+        </span>
       </div>
-      {visibleNotices.length === 0 ? (
-        <p className="inbox-empty">{filter === 'unread' ? 'No unread notifications.' : 'Your inbox is empty.'}</p>
-      ) : (
-        <div className="inbox-list">
-          {visibleNotices.map((notice) => {
-            const actionRequired = requiresInboxAction(notice)
-            const timestamp = inboxTimestamp(notice)
-            const label = notice.requestType === 'cohost' ? 'Co-hosting request' : 'Participation request'
-            return (
-              <article
-                key={notice.id}
-                aria-label={notice.eventTitle}
-                className={`inbox-card${notice.isRead ? '' : ' inbox-card-unread'}`}
-              >
-                <div className="inbox-card-meta">
-                  <span>{label}</span>
-                  <span className="inbox-direction">{notice.type}</span>
-                  {!notice.isRead ? <span className="inbox-unread-indicator">Unread</span> : null}
-                </div>
-                <div className="inbox-card-heading">
-                  <h3>{notice.eventTitle}</h3>
-                  <span className={`inbox-status inbox-status-${notice.status}`}>{notice.status}</span>
-                </div>
-                <p className="inbox-description">{notice.message}</p>
-                <div className="inbox-card-footer">
-                  <div className="inbox-card-timing">
-                    <time dateTime={timestamp}>
-                      {new Date(timestamp).toLocaleString(undefined, {
-                        month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
-                      })}
-                    </time>
-                    {actionRequired ? <span className="inbox-action-label">Needs review</span> : null}
-                  </div>
-                  <div className="inbox-card-actions">
+      <div className="mt-5 space-y-3">
+        {profileInbox.length === 0 ? (
+          <p className="text-sm text-stone-600">Your inbox is empty.</p>
+        ) : (
+          profileInbox.map((notice) => (
+            <article
+              key={notice.id}
+              className={`border p-4 ${
+                notice.isRead
+                  ? 'border-stone-200 bg-stone-50'
+                  : 'border-orange-800/25 bg-stone-50'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm font-semibold text-stone-900">{notice.title}</p>
+                <span className="border border-stone-300 px-2 py-0.5 text-[10px] uppercase tracking-wide text-stone-600">
+                  {notice.type}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-stone-600">{notice.message}</p>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-[11px] uppercase tracking-wide text-stone-500">
+                  {new Date(notice.createdAt).toLocaleDateString()}
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    aria-label={`View details for ${notice.title}`}
+                    onClick={() => {
+                      if (!notice.isRead) onMarkRead(notice.id)
+                      onViewRequest(notice)
+                    }}
+                    className="text-xs font-semibold text-orange-800 hover:text-orange-800"
+                  >
+                    View Details
+                  </button>
+                  {!notice.isRead ? (
                     <button
                       type="button"
-                      aria-label={`View details for ${notice.eventTitle}`}
-                      onClick={() => {
-                        if (!notice.isRead) onMarkRead(notice.id)
-                        onViewRequest(notice)
-                      }}
-                      className={actionRequired ? 'button-primary' : 'button-secondary'}
+                      onClick={() => onMarkRead(notice.id)}
+                      className="text-xs font-medium text-orange-800 hover:text-orange-800"
                     >
-                      View Details
+                      Mark read
                     </button>
-                    {!notice.isRead ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onMarkRead(notice.id)
-                          activeFilterRef.current?.focus()
-                        }}
-                        className="inbox-mark-read"
-                      >
-                        Mark read
-                      </button>
-                    ) : null}
-                  </div>
+                  ) : null}
                 </div>
-              </article>
-            )
-          })}
-        </div>
-      )}
+              </div>
+            </article>
+          ))
+        )}
+      </div>
     </section>
   )
 }
@@ -676,6 +635,15 @@ interface EventListProps {
   ) => Promise<boolean>
 }
 
+const formatDateLabel = (date: string) => {
+  const [year, month, day] = date.split('-').map(Number)
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 export const EventList = ({
   events,
   activeProfile,
@@ -752,7 +720,7 @@ export const EventList = ({
         setEstimatedAttendees('')
         setAttendeesNotSure(false)
       } else {
-        setSubmissionError('Could not send this request. Try again or contact support.')
+        setSubmissionError('Could not send your request. Review the error and try again.')
       }
     } catch (error) {
       setSubmissionError(
@@ -1268,8 +1236,8 @@ export const HostEventForm = ({
   }
 
   return (
-  <section id="host" tabIndex={-1} className="panel host-panel" aria-labelledby="host-heading">
-    <h2 id="host-heading" className="text-2xl font-bold text-stone-900">Create an Event</h2>
+  <section id="host" className="panel host-panel">
+    <h2 className="text-2xl font-bold text-stone-900">Create an Event</h2>
     <p className="mt-2 text-sm text-stone-600">
       This profile can publish events as an organization. Profile type does not verify administrator
       authorization.
@@ -1393,7 +1361,6 @@ interface HostedEventsProps {
   profile: UserProfile | null
   onUpdate: (event: EventItem) => Promise<void>
   onPublish?: (event: EventItem) => Promise<void>
-  onResolveRequest?: (request: EventRequest, status: 'accepted' | 'declined') => Promise<boolean>
   onDelete: (event: EventItem) => Promise<void>
 }
 
@@ -1460,10 +1427,8 @@ export const HostedEvents = ({
   profile,
   onUpdate,
   onPublish,
-  onResolveRequest,
   onDelete,
 }: HostedEventsProps) => {
-  const [statusFilter, setStatusFilter] = useState<'active' | EventPublicationStatus>('active')
   const [viewingEventId, setViewingEventId] = useState<string | null>(null)
   const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<EventEditValues | null>(null)
@@ -1480,47 +1445,12 @@ export const HostedEvents = ({
   } | null>(null)
   const [workflowConfirmed, setWorkflowConfirmed] = useState(false)
   const [workflowSubmitting, setWorkflowSubmitting] = useState(false)
-  const [resolvingRequest, setResolvingRequest] = useState<{
-    id: string
-    status: 'accepted' | 'declined'
-  } | null>(null)
-  const requestInFlight = useRef(false)
-
-  const resolveCoHostRequest = async (request: EventRequest, status: 'accepted' | 'declined') => {
-    if (!onResolveRequest || requestInFlight.current) return
-    requestInFlight.current = true
-    setResolvingRequest({ id: request.id, status })
-    setFeedback(null)
-    try {
-      const succeeded = await onResolveRequest(request, status)
-      setFeedback({
-        eventId: request.eventId,
-        message: succeeded
-          ? `Co-host request from ${request.requesterName} ${status}.`
-          : `Could not ${status === 'accepted' ? 'accept' : 'decline'} the request from ${request.requesterName}. Try again.`,
-        error: !succeeded,
-      })
-    } catch (error) {
-      setFeedback({
-        eventId: request.eventId,
-        message: error instanceof Error ? error.message : 'Could not resolve the co-host request.',
-        error: true,
-      })
-    } finally {
-      requestInFlight.current = false
-      setResolvingRequest(null)
-    }
-  }
 
   const hostedEvents = profile
     ? events.filter(
         (event) => event.hostId === profile.id || event.hostOwnerId === profile.ownerId,
       )
     : []
-  const visibleEvents = hostedEvents.filter((event) => {
-    const status = event.publicationStatus ?? 'draft'
-    return statusFilter === 'active' ? status !== 'cancelled' : status === statusFilter
-  })
   const workflowRequests = workflowDialog
     ? eventRequests.filter(
         (request) =>
@@ -1530,11 +1460,6 @@ export const HostedEvents = ({
   const acceptedWorkflowPartners = workflowRequests.filter(
     (request) => request.status === 'accepted',
   )
-  const workflowEvent = workflowDialog
-    ? events.find((event) => event.id === workflowDialog.event.id) ?? workflowDialog.event
-    : null
-  const completingWithoutCoHosts = workflowDialog?.action === 'ready' &&
-    (workflowEvent?.confirmedCoHosts?.length ?? acceptedWorkflowPartners.length) === 0
 
   const updateEditField = (
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -1781,92 +1706,35 @@ export const HostedEvents = ({
 
   return (
     <section className="panel" aria-labelledby="hosted-events-heading">
-      <h2 id="hosted-events-heading" tabIndex={-1} className="text-2xl font-bold text-stone-900">
+      <h2 id="hosted-events-heading" className="text-2xl font-bold text-stone-900">
         Managing Events
       </h2>
-      <label className="form-field mt-3 max-w-xs">
-        <span>Filter by status</span>
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-        >
-          <option value="active">Active events</option>
-          {Object.entries(publicationStatusLabels).map(([status, label]) => (
-            <option key={status} value={status}>{label}</option>
-          ))}
-        </select>
-      </label>
       {managementNotice ? (
         <p role="status" className="event-feedback event-feedback-success mt-4">
           {managementNotice}
         </p>
       ) : null}
       <div className="mt-4 space-y-3">
-        {visibleEvents.length === 0 ? (
-          <p className="text-sm text-stone-600">
-            {hostedEvents.length === 0
-              ? 'Events created by this profile will appear here.'
-              : 'No events match this status filter.'}
-          </p>
+        {hostedEvents.length === 0 ? (
+          <p className="text-sm text-stone-600">Events created by this profile will appear here.</p>
         ) : (
-          visibleEvents.map((event) => {
-            const isAuthorizedCreator = profile?.profileType === 'organization' &&
-              profile.ownerId === event.hostOwnerId && profile.id === event.hostId
+          hostedEvents.map((event) => {
+            const isAuthorizedCreator = profile?.ownerId === event.hostOwnerId
             const isEditing = editingEventId === event.id
             const publicationStatus = event.publicationStatus ?? 'draft'
             const relatedRequests = eventRequests.filter(
               (request) => request.eventId === event.id && request.requestType === 'cohost',
             )
             const pendingRequests = relatedRequests.filter((request) => request.status === 'pending')
-            const canReviewRequests = Boolean(onResolveRequest && isAuthorizedCreator)
-            const reviewableRequests = pendingRequests.filter(
-              (request) => request.hostOwnerId === event.hostOwnerId &&
-                request.hostProfileId === event.hostId,
-            )
-            const confirmedCoHosts = event.confirmedCoHosts ?? relatedRequests
-              .filter((request) => request.status === 'accepted')
-              .map((request) => ({ profileId: request.requesterProfileId, name: request.requesterName }))
-            const confirmedCount = confirmedCoHosts.length
-            const nextStep = {
-              draft: 'Start collaboration to open the event to co-host requests.',
-              pending_collaboration: pendingRequests.length > 0
-                ? 'Review pending co-host requests before completing collaboration.'
-                : 'Complete collaboration when the necessary arrangements are in place.',
-              ready_to_publish: pendingRequests.length > 0
-                ? 'Resolve pending co-host requests before publishing.'
-                : 'Review the event and confirm publication.',
-              published: 'This event is published.',
-              cancelled: 'This event is cancelled.',
-            }[publicationStatus]
-            const workflowAction = ({
-              draft: 'start',
-              pending_collaboration: 'ready',
-              ready_to_publish: 'publish',
-              published: null,
-              cancelled: null,
-            } as const)[publicationStatus]
-            const showWorkflowAction = isAuthorizedCreator && workflowAction !== null
-            const reviewPending = showWorkflowAction && pendingRequests.length > 0
-            const showingDetails = viewingEventId === event.id
-            const detailsLabel = showingDetails ? 'Hide Details' : 'View Details'
-            const detailsId = `managed-event-details-${event.id}`
-            const pendingHeadingId = `managed-event-requests-${event.id}`
-            const toggleDetails = () => setViewingEventId((current) => current === event.id ? null : event.id)
-            const eventBusy = savingEventId === event.id || deletingEventId === event.id
-            const canCancel = publicationStatus !== 'cancelled' &&
-              (event.collaborationVersion !== 2 || eventRequests.some((request) => request.eventId === event.id))
 
             return (
               <article
                 key={event.id}
-                id={managedEventId(event.id)}
-                tabIndex={-1}
-                aria-labelledby={`managed-event-title-${event.id}`}
                 className="border border-stone-200 bg-stone-50 p-4"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 id={`managed-event-title-${event.id}`} className="font-semibold text-stone-900">{event.title}</h3>
+                    <h3 className="font-semibold text-stone-900">{event.title}</h3>
                     <p className="mt-1 text-sm text-stone-600">
                       {event.location} · {event.attendees} / {event.capacity} participants
                     </p>
@@ -1874,95 +1742,103 @@ export const HostedEvents = ({
                       className={`mt-2 inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
                         publicationStatus === 'pending_collaboration'
                           ? 'border-[#F5C76E] bg-[#FFF3D6] text-[#92400E]'
-                          : 'border-stone-200 bg-white text-stone-700'
+                          : 'border-blue-100 bg-blue-50 text-blue-800'
                       }`}
                     >
-                      {publicationStatusLabels[publicationStatus]}
+                      {publicationStatus === 'pending_collaboration'
+                        ? 'Pending Collaboration'
+                        : publicationStatus === 'ready_to_publish'
+                          ? 'Ready to Publish'
+                          : publicationStatus.charAt(0).toUpperCase() +
+                            publicationStatus.slice(1)}
                       {!event.publicationStatus ? ' · Legacy event' : ''}
                     </p>
                   </div>
-                  <div className="managed-event-actions">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="button-primary"
-                      aria-expanded={showWorkflowAction ? undefined : showingDetails}
-                      aria-controls={showWorkflowAction ? undefined : detailsId}
-                      disabled={showWorkflowAction && !reviewPending && (workflowSubmitting || eventBusy)}
-                      onClick={() => {
-                        if (reviewPending) {
-                          const heading = document.getElementById(pendingHeadingId)
-                          heading?.focus({ preventScroll: true })
-                          heading?.scrollIntoView?.({ block: 'nearest' })
-                        } else if (showWorkflowAction) {
-                          setWorkflowConfirmed(false)
-                          setWorkflowDialog({ event, action: workflowAction })
-                        } else {
-                          toggleDetails()
-                        }
-                      }}
+                      aria-expanded={viewingEventId === event.id}
+                      onClick={() =>
+                        setViewingEventId((current) => (current === event.id ? null : event.id))
+                      }
+                      className="border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-slate-100"
                     >
-                      {reviewPending ? 'Review Requests' : showWorkflowAction
-                        ? { start: 'Start Collaboration', ready: 'Complete Collaboration', publish: 'Publish' }[workflowAction]
-                        : detailsLabel}
+                      {viewingEventId === event.id ? 'Hide Details' : 'View Details'}
                     </button>
                     {isAuthorizedCreator ? (
-                      <details
-                        className="managed-event-overflow"
-                        onBlur={(interaction) => {
-                          if (!interaction.currentTarget.contains(interaction.relatedTarget)) {
-                            interaction.currentTarget.open = false
-                          }
-                        }}
-                        onKeyDown={(interaction) => {
-                          if (interaction.key !== 'Escape' || !interaction.currentTarget.open) return
-                          interaction.preventDefault()
-                          interaction.currentTarget.open = false
-                          interaction.currentTarget.querySelector('summary')?.focus()
-                        }}
-                      >
-                        <summary aria-label={`More actions for ${event.title}`}>⋯</summary>
-                        <div
-                          className="managed-event-overflow-items"
-                          onClick={(interaction) => {
-                            if (!(interaction.target instanceof HTMLButtonElement)) return
-                            const disclosure = interaction.currentTarget.closest('details')
-                            if (disclosure) {
-                              disclosure.open = false
-                              disclosure.querySelector('summary')?.focus()
-                            }
-                          }}
-                        >
-                          {showWorkflowAction ? (
-                            <button
-                              type="button"
-                              aria-expanded={showingDetails}
-                              aria-controls={detailsId}
-                              onClick={toggleDetails}
-                            >
-                              {detailsLabel}
-                            </button>
-                          ) : null}
+                      <>
+                        {publicationStatus === 'draft' ? (
                           <button
                             type="button"
-                            disabled={eventBusy}
+                            disabled={workflowSubmitting || deletingEventId === event.id}
                             onClick={() => {
-                              setEditingEventId(event.id)
-                              setEditValues(eventToEditValues(event))
-                              setFeedback(null)
+                              setWorkflowConfirmed(false)
+                              setWorkflowDialog({ event, action: 'start' })
                             }}
+                            className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                           >
-                            Edit
+                            Start Collaboration
                           </button>
-                          {canCancel ? (
-                            <button type="button" disabled={eventBusy} onClick={() => void handleCancel(event)}>
-                              Cancel Event
-                            </button>
-                          ) : null}
-                          <button type="button" disabled={eventBusy} onClick={() => void handleDelete(event)}>
-                            {deletingEventId === event.id ? 'Deleting…' : 'Delete'}
+                        ) : null}
+                        {publicationStatus === 'pending_collaboration' ? (
+                          <button
+                            type="button"
+                            disabled={workflowSubmitting || pendingRequests.length > 0}
+                            onClick={() => {
+                              setWorkflowConfirmed(false)
+                              setWorkflowDialog({ event, action: 'ready' })
+                            }}
+                            className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {pendingRequests.length > 0
+                              ? `${pendingRequests.length} Pending Request${pendingRequests.length === 1 ? '' : 's'}`
+                              : 'Complete Collaboration'}
                           </button>
-                        </div>
-                      </details>
+                        ) : null}
+                        {publicationStatus === 'ready_to_publish' ? (
+                          <button
+                            type="button"
+                            disabled={workflowSubmitting || pendingRequests.length > 0}
+                            onClick={() => {
+                              setWorkflowConfirmed(false)
+                              setWorkflowDialog({ event, action: 'publish' })
+                            }}
+                            className="rounded-full bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Publish Event
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={savingEventId === event.id || deletingEventId === event.id}
+                          onClick={() => {
+                            setEditingEventId(event.id)
+                            setEditValues(eventToEditValues(event))
+                            setFeedback(null)
+                          }}
+                          className="border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                        {publicationStatus !== 'cancelled' && (event.collaborationVersion !== 2 || eventRequests.some(request => request.eventId === event.id)) ? (
+                          <button
+                            type="button"
+                            disabled={deletingEventId === event.id || savingEventId === event.id}
+                            onClick={() => void handleCancel(event)}
+                            className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                          >
+                            Cancel Event
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={deletingEventId === event.id || savingEventId === event.id}
+                          onClick={() => void handleDelete(event)}
+                          className="border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingEventId === event.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </>
                     ) : null}
                   </div>
                 </div>
@@ -1971,94 +1847,8 @@ export const HostedEvents = ({
                     Only the account that published this event can edit or delete it.
                   </p>
                 ) : null}
-                <section aria-label={`Collaboration workspace for ${event.title}`} className="mt-4 space-y-3 border-t border-stone-200 pt-4 text-sm text-slate-700">
-                  <h4 className="font-semibold text-slate-900">Event Collaboration Workspace</h4>
-                  <p>{nextStep}</p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <h5 id={pendingHeadingId} tabIndex={-1} className="font-semibold text-slate-900">
-                        Pending co-host requests ({pendingRequests.length})
-                      </h5>
-                      {pendingRequests.length === 0 ? <p>No pending requests.</p> : null}
-                      {canReviewRequests && reviewableRequests.map((request) => {
-                        const processing = resolvingRequest?.id === request.id ? resolvingRequest.status : null
-                        return (
-                          <article key={request.id} className="cohost-review-card" aria-label={`Co-host request from ${request.requesterName}`}>
-                            <header>
-                              <h6>{request.requesterName}</h6>
-                              <span className="cohost-review-status">Pending</span>
-                            </header>
-                            <p><strong>Resources offered</strong> {request.resourcesProvided?.join(', ') || 'None listed'}</p>
-                            <p className="cohost-review-summary">{request.contributionDescription || 'No contribution description provided.'}</p>
-                            {publicationStatus === 'pending_collaboration' ? (
-                              <div className="cohost-review-actions">
-                                <button
-                                  type="button"
-                                  className="button-primary"
-                                  aria-label={`Accept request from ${request.requesterName}`}
-                                  disabled={resolvingRequest !== null || workflowSubmitting}
-                                  onClick={() => void resolveCoHostRequest(request, 'accepted')}
-                                >
-                                  {processing === 'accepted' ? 'Accepting…' : 'Accept'}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="button-secondary"
-                                  aria-label={`Decline request from ${request.requesterName}`}
-                                  disabled={resolvingRequest !== null || workflowSubmitting}
-                                  onClick={() => void resolveCoHostRequest(request, 'declined')}
-                                >
-                                  {processing === 'declined' ? 'Declining…' : 'Decline'}
-                                </button>
-                              </div>
-                            ) : null}
-                            {processing ? <span role="status" className="sr-only">Submitting decision for {request.requesterName}.</span> : null}
-                            <details>
-                              <summary aria-label={`View details for ${request.requesterName}`}>View Details</summary>
-                              <dl className="mt-2 space-y-2">
-                                <div><dt className="font-medium">Contribution details</dt><dd className="whitespace-pre-wrap">{request.contributionDescription || 'None listed'}</dd></div>
-                                <div><dt className="font-medium">Available dates</dt><dd>{request.availableDates.map(formatDateLabel).join(', ') || 'None listed'}</dd></div>
-                                <div><dt className="font-medium">Estimated attendees</dt><dd>{request.estimatedAttendees ?? 'Unspecified'}</dd></div>
-                                <div><dt className="font-medium">Message</dt><dd className="whitespace-pre-wrap">{request.message || 'None provided'}</dd></div>
-                              </dl>
-                            </details>
-                          </article>
-                        )
-                      })}
-                    </div>
-                    <div>
-                      <div className="cohost-confirmed-heading">
-                        <h5 className="font-semibold text-slate-900">Confirmed co-hosts</h5>
-                        {confirmedCount > 0 ? (
-                          <span className="cohost-confirmed-badge">
-                            {confirmedCount} Confirmed {confirmedCount === 1 ? 'Co-Host' : 'Co-Hosts'}
-                          </span>
-                        ) : null}
-                      </div>
-                      {confirmedCount > 0 ? (
-                        <>
-                          <ul className="cohost-confirmed-list">
-                            {confirmedCoHosts.map((partner) => (
-                              <li key={partner.profileId} className="cohost-confirmed-card">
-                                <span className="cohost-confirmed-check" aria-hidden="true">✓</span>
-                                <div>
-                                  <strong>{partner.name}</strong>
-                                  <span className="cohost-confirmed-label">Confirmed Co-Host</span>
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                          {publicationStatus === 'pending_collaboration' && pendingRequests.length === 0 ? (
-                            <p className="cohost-confirmed-success">All requests resolved · Ready to complete collaboration.</p>
-                          ) : null}
-                        </>
-                      ) : <p className="cohost-confirmed-empty">No co-hosts confirmed yet.</p>}
-                    </div>
-                  </div>
-                </section>
-                {showingDetails ? (
+                {viewingEventId === event.id ? (
                   <dl
-                    id={detailsId}
                     role="region"
                     className="mt-4 grid gap-3 border-t border-stone-200 pt-4 text-sm sm:grid-cols-2"
                     aria-label={`Details for ${event.title}`}
@@ -2228,7 +2018,6 @@ export const HostedEvents = ({
             role="dialog"
             aria-modal="true"
             aria-labelledby="publication-dialog-title"
-            aria-describedby={completingWithoutCoHosts ? 'no-confirmed-cohosts-warning' : undefined}
             className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-4">
@@ -2278,11 +2067,6 @@ export const HostedEvents = ({
                   : 'This event will become discoverable to eligible organizations for co-hosting. It will remain hidden from students.'}
               </p>
             )}
-            {completingWithoutCoHosts ? (
-              <p id="no-confirmed-cohosts-warning" className="error-note mt-4 mb-0">
-                No co-hosts have been confirmed for this event. Do you want to complete collaboration without a co-host?
-              </p>
-            ) : null}
             <label className="mt-5 flex items-start gap-3 text-sm text-slate-700">
               <input
                 type="checkbox"
@@ -2303,7 +2087,7 @@ export const HostedEvents = ({
               type="button"
               disabled={!workflowConfirmed || workflowSubmitting}
               onClick={() => void handleWorkflowConfirmation()}
-              className="button-primary mt-5 w-full"
+              className="mt-5 w-full rounded-full bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {workflowSubmitting
                 ? 'Saving...'

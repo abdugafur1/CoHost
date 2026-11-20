@@ -4,7 +4,6 @@ import App from './App'
 import {
   continueWithoutEmail,
   DuplicateEventTitleError,
-  publishEvent,
   resolveEventRequest,
   saveEventItem,
   saveOrganizationProfile,
@@ -16,7 +15,6 @@ import {
   subscribeEvents,
   subscribeUserProfiles,
   subscribeEventRequests,
-  updateEventItem,
 } from './services/cohost'
 import type { EventItem, EventRequest, UserProfile } from './types'
 
@@ -33,8 +31,6 @@ vi.mock('./services/cohost', () => ({
       `${eventId}_${ownerId}_${profileId}_${requestType}`,
   ),
   resolveEventRequest: vi.fn(),
-  publishEvent: vi.fn(),
-  updateEventItem: vi.fn(),
   saveOrganizationProfile: vi.fn(),
   saveUserProfile: vi.fn(),
   signInWithGoogle: vi.fn(),
@@ -64,7 +60,6 @@ describe('CoHost app', () => {
 
     fireEvent.click(screen.getByRole('link', { name: /host an event/i }))
     expect(screen.getByRole('button', { name: /^profile$/i }).getAttribute('aria-current')).toBe('page')
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
     fireEvent.click(screen.getByRole('link', { name: /browse events/i }))
     expect(screen.getByRole('button', { name: /^events$/i }).getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('button', { name: /^account$/i }))
@@ -381,10 +376,6 @@ describe('CoHost app', () => {
     expect(screen.getByText(/student dashboard/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /create event/i })).toBeNull()
     expect(screen.getByText(/no events have been posted yet/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^events$/i }))
-    expect(screen.getByRole('heading', { name: /available community events/i })).toBeVisible()
-    expect(screen.queryByRole('heading', { name: /create an event|managing events/i })).toBeNull()
-    expect(screen.queryByRole('combobox', { name: /filter by status/i })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /^profile$/i }))
     fireEvent.click(screen.getByRole('button', { name: /create new profile/i }))
@@ -412,12 +403,11 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('button', { name: /^profile$/i }))
     expect(screen.getByText(/organization profiles do not establish administrator authorization/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    expect(screen.queryByRole('heading', { name: /managing events/i })).toBeNull()
+    expect(screen.getByRole('heading', { name: /managing events/i })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: /collaboration requests/i })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
     expect(screen.getByRole('tab', { name: /incoming requests/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('link', { name: /host an event/i }))
-    expect(screen.getByRole('region', { name: /create an event/i })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
 
     fireEvent.change(screen.getByRole('textbox', { name: /event title/i }), {
       target: { value: 'Community Workshop' },
@@ -689,7 +679,6 @@ describe('CoHost app', () => {
     vi.mocked(saveEventRequest).mockResolvedValue(undefined)
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /^events$/i }))
     fireEvent.click(screen.getByRole('button', { name: /request to co-host/i }))
     expect(saveEventRequest).not.toHaveBeenCalled()
     const dialog = screen.getByRole('dialog', { name: /request to co-host/i })
@@ -733,7 +722,7 @@ describe('CoHost app', () => {
     )
   })
 
-  it('keeps ten dates, unknown attendance, and a blank message after a co-host save is denied', async () => {
+  it('validates co-host resource selection and keeps the modal values after a failed save', async () => {
     const requesterProfile: UserProfile = {
       id: 'requester-club',
       ownerId: 'requester-owner',
@@ -754,7 +743,7 @@ describe('CoHost app', () => {
       location: 'Arts Hall',
       description: 'An evening of art.',
       audience: 'organizations',
-      dateOptions: Array.from({ length: 10 }, (_, index) => `2026-12-${String(index + 1).padStart(2, '0')}`),
+      dateOptions: ['2026-12-01'],
       capacity: 30,
       attendees: 0,
       createdAt: '2026-11-01T10:00:00.000Z',
@@ -772,64 +761,34 @@ describe('CoHost app', () => {
       onEvents([hostEvent])
       return vi.fn()
     })
-    vi.mocked(saveEventRequest).mockRejectedValueOnce(Object.assign(new Error('Missing or insufficient permissions'), {
-      code: 'permission-denied',
-    }))
-    vi.mocked(saveEventRequest).mockResolvedValueOnce(undefined)
+    vi.mocked(saveEventRequest).mockRejectedValue(new Error('permission denied'))
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /^events$/i }))
     fireEvent.click(screen.getByRole('button', { name: /request to co-host/i }))
     fireEvent.click(screen.getByRole('button', { name: /submit request/i }))
     expect(screen.getByRole('alert').textContent).toMatch(/describe what your organization can contribute/i)
     expect(saveEventRequest).not.toHaveBeenCalled()
 
     fireEvent.change(screen.getByRole('textbox', { name: /contribution details/i }), {
-      target: { value: 'Venue support.\nWe can also help with setup.' },
+      target: { value: 'Venue support.' },
     })
     fireEvent.click(screen.getByRole('button', { name: /submit request/i }))
     expect(screen.getByRole('alert').textContent).toMatch(/select at least one resource/i)
     expect(saveEventRequest).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('checkbox', { name: /provide venue/i }))
-    for (let day = 1; day <= 10; day += 1) {
-      const label = new Date(2026, 11, day).toLocaleDateString(undefined, {
-        month: 'short', day: 'numeric', year: 'numeric',
-      })
-      fireEvent.click(screen.getByRole('button', { name: `Select ${label}` }))
-    }
-    fireEvent.change(screen.getByRole('spinbutton', { name: /estimated number of attendees/i }), {
-      target: { value: '12' },
-    })
-    fireEvent.click(screen.getByRole('checkbox', { name: /not sure yet/i }))
     fireEvent.click(screen.getByRole('button', { name: /submit request/i }))
 
-    const dialog = within(screen.getByRole('dialog'))
-    expect(await dialog.findByRole('alert')).toHaveTextContent(/refresh events.*correct organization profile/i)
+    expect(
+      await screen.findByText(/could not send your co-hosting request.*permission denied/i),
+    ).toBeTruthy()
+    expect(screen.getByRole('dialog')).toBeTruthy()
     expect((screen.getByRole('textbox', { name: /contribution details/i }) as HTMLTextAreaElement).value).toBe(
-      'Venue support.\nWe can also help with setup.',
+      'Venue support.',
     )
     expect((screen.getByRole('checkbox', { name: /provide venue/i }) as HTMLInputElement).checked).toBe(
       true,
     )
     expect(saveEventRequest).toHaveBeenCalledTimes(1)
-    const submitted = vi.mocked(saveEventRequest).mock.calls[0][0]
-    expect(submitted).toMatchObject({
-      availableDates: hostEvent.dateOptions,
-      attendeeCount: 0,
-      resourcesProvided: ['Venue'],
-      requesterOwnerId: requesterProfile.ownerId,
-      requesterProfileId: requesterProfile.id,
-      message: 'Co-hosting request: Interested in collaborating on this event.',
-    })
-    expect(submitted).not.toHaveProperty('estimatedAttendees')
-    expect(dialog.getByRole('checkbox', { name: /not sure yet/i })).toBeChecked()
-    expect(dialog.getByRole('textbox', { name: /co-hosting message/i })).toHaveValue('')
-    fireEvent.click(dialog.getByRole('button', { name: /submit request/i }))
-    expect(await screen.findByText(/co-hosting request for campus arts night has been sent/i)).toBeVisible()
-    expect(saveEventRequest).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      id: submitted.id,
-      availableDates: hostEvent.dateOptions,
-    }))
   })
 
   it('supports a general contribution for legacy events and prevents duplicate submissions', async () => {
@@ -876,7 +835,6 @@ describe('CoHost app', () => {
     vi.mocked(saveEventRequest).mockReturnValue(pendingSave)
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /^events$/i }))
     fireEvent.click(screen.getByRole('button', { name: /request to co-host/i }))
     expect(
       (screen.getByRole('checkbox', { name: /general contribution/i }) as HTMLInputElement).checked,
@@ -975,11 +933,6 @@ describe('CoHost app', () => {
       incomingCoHostRequest.id,
     )
     expect(screen.queryByRole('button', { name: /^decline$/i })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /^inbox$/i }))
-    const updatedNotice = within(screen.getByRole('article', { name: incomingCoHostRequest.eventTitle }))
-    expect(updatedNotice.getByText(/^accepted$/i)).toBeVisible()
-    expect(updatedNotice.queryByText('Needs review')).toBeNull()
-    expect(screen.getByRole('status', { name: '' })).toHaveTextContent('0 unread')
 
     firstView.unmount()
     render(<App />)
@@ -1056,12 +1009,6 @@ describe('CoHost app', () => {
     )
 
     const view = render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /^inbox$/i }))
-    expect(screen.getByRole('article', { name: studentRequest.eventTitle })).toBeVisible()
-    expect(screen.queryByRole('article', { name: organizationRequest.eventTitle })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Unread' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Mark read' }))
-    expect(screen.getByText('No unread notifications.')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
     fireEvent.click(screen.getByRole('tab', { name: /sent requests/i }))
     expect(await screen.findByText('Student Event')).toBeTruthy()
@@ -1072,10 +1019,6 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('option', { name: /organization profile organization/i }))
     expect(localStorage.getItem('cohost.activeProfileId')).toBe(organizationProfile.id)
     expect(screen.getByText(/organization dashboard/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^inbox$/i }))
-    expect(screen.getByRole('article', { name: organizationRequest.eventTitle })).toBeVisible()
-    expect(screen.queryByRole('article', { name: studentRequest.eventTitle })).toBeNull()
-    expect(screen.getByRole('status')).toHaveTextContent('1 unread')
     fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
     fireEvent.click(screen.getByRole('tab', { name: /sent requests/i }))
     expect(await screen.findByText('Organization Event')).toBeTruthy()
@@ -1087,9 +1030,6 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('option', { name: /student profile student/i }))
     expect(localStorage.getItem('cohost.activeProfileId')).toBe(studentProfile.id)
     expect(screen.getByText(/student dashboard/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^inbox$/i }))
-    expect(screen.getByRole('status')).toHaveTextContent('0 unread')
-    expect(screen.getByRole('article', { name: studentRequest.eventTitle })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
     fireEvent.click(screen.getByRole('tab', { name: /sent requests/i }))
     expect(await screen.findByText('Student Event')).toBeTruthy()
@@ -1151,215 +1091,6 @@ describe('CoHost app', () => {
     fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
     fireEvent.click(screen.getByRole('tab', { name: /sent requests/i }))
     expect(screen.getByText('Persisted Event')).toBeTruthy()
-  })
-
-  it('links the organizer overview to filtered Events and progresses to explicit publication there', async () => {
-    const host: UserProfile = {
-      id: 'workspace-host', ownerId: 'workspace-owner', name: 'Arts Club',
-      profileType: 'organization', focus: 'Arts', location: 'Campus', description: '',
-      createdAt: '2026-10-01',
-    }
-    const otherProfile = { ...host, id: 'other-profile', name: 'Other Club' }
-    const event: EventItem = {
-      id: 'workspace-event', title: 'Arts Workshop', hostId: host.id, hostOwnerId: host.ownerId,
-      hostName: host.name, hostProfileType: 'organization', location: 'Campus',
-      description: 'Art workshop', audience: 'everyone', capacity: 20, attendees: 0,
-      dateOptions: ['2026-12-01'], createdAt: '2026-10-01', collaborationVersion: 2,
-      publicationStatus: 'pending_collaboration', confirmedCoHosts: [],
-    }
-    const request: EventRequest = {
-      id: 'cohost-1', requestType: 'cohost', eventId: event.id, eventTitle: event.title,
-      hostOwnerId: host.ownerId, hostProfileId: host.id, requesterOwnerId: 'partner-owner',
-      requesterProfileId: 'partner', requesterName: 'Craft Club', requesterProfileType: 'organization',
-      availableDates: event.dateOptions, attendeeCount: 0, message: 'We can bring supplies.',
-      resourcesProvided: ['Materials'], contributionDescription: 'We can provide materials for the workshop.',
-      estimatedAttendees: 12,
-      status: 'pending', createdAt: '2026-10-02',
-    }
-    const readyEvent: EventItem = {
-      ...event, id: 'ready-event', title: 'Gallery Opening', createdAt: '2026-10-03',
-      publicationStatus: 'ready_to_publish', collaborationRequirementsCompleted: true,
-      confirmedCoHosts: [{ profileId: 'gallery-partner', name: 'Gallery Society' }],
-    }
-    const cancelledEvent: EventItem = {
-      ...event, id: 'cancelled-event', title: 'Cancelled Exhibition', createdAt: '2026-10-04',
-      publicationStatus: 'cancelled',
-    }
-    const publishedEvent: EventItem = {
-      ...event, id: 'published-event', title: 'Art Fair', createdAt: '2026-09-02',
-      publicationStatus: 'published',
-    }
-    const draftEvent: EventItem = {
-      ...event, id: 'draft-event', title: 'Drawing Class', createdAt: '2026-09-01',
-      publicationStatus: 'draft',
-    }
-    const second = { ...request, id: 'cohost-2', requesterName: 'Music Club', requesterProfileId: 'music', message: '' }
-    const unrelated = { ...request, id: 'cohost-3', eventId: 'another-event', requesterName: 'Drama Club' }
-    const partner = { profileId: request.requesterProfileId, name: request.requesterName }
-    localStorage.setItem('cohost.userProfiles', JSON.stringify([host, otherProfile]))
-    localStorage.setItem('cohost.activeProfileId', otherProfile.id)
-    vi.mocked(subscribeAuthUser).mockImplementation((onUser) => {
-      onUser({ uid: host.ownerId } as never)
-      return vi.fn()
-    })
-    let emitEvents: (events: EventItem[]) => void = () => {}
-    vi.mocked(subscribeEvents).mockImplementation((_owner, _profile, onEvents) => {
-      emitEvents = onEvents
-      onEvents([event, readyEvent, cancelledEvent, publishedEvent, draftEvent])
-      return vi.fn()
-    })
-    vi.mocked(subscribeEventRequests).mockImplementation((_owner, _profile, _type, onRequests) => {
-      onRequests([request, second, unrelated])
-      return vi.fn()
-    })
-    let finishAcceptance = () => {}
-    const acceptance = new Promise<void>((resolve) => { finishAcceptance = resolve })
-    vi.mocked(resolveEventRequest).mockImplementation(async (_request, status) => {
-      if (status === 'accepted') await acceptance
-      if (status === 'accepted') emitEvents([{ ...event, confirmedCoHosts: [partner] }])
-    })
-    vi.mocked(updateEventItem).mockImplementation(async (updated) => ({
-      ...updated,
-      titleReservationId: 'arts-workshop',
-    }))
-    vi.mocked(publishEvent).mockImplementation(async () => {
-      emitEvents([{ ...event, confirmedCoHosts: [partner], publicationStatus: 'published', collaborationRequirementsCompleted: true }])
-      return [partner]
-    })
-
-    render(<App />)
-    const workspace = () => within(screen.getByRole('region', { name: /collaboration workspace for arts workshop/i }))
-    expect(screen.queryByRole('link', { name: /arts workshop|gallery opening/i })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /^events$/i }))
-    expect(workspace().queryByText('Craft Club')).not.toBeInTheDocument()
-    expect(workspace().queryByRole('button', { name: /accept|decline/i })).not.toBeInTheDocument()
-    expect(resolveEventRequest).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByRole('button', { name: /^profile$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /switch profile/i }))
-    await act(async () => {
-      fireEvent.click(screen.getByRole('option', { name: /arts club organization/i }))
-    })
-    const overview = screen.getByRole('region', { name: /organization dashboard/i })
-    expect(within(overview).getByRole('heading', { name: 'Welcome, Arts Club' })).toBeVisible()
-    for (const [label, count] of [['Owned events', '5'], ['Pending requests', '3'], ['Ready to publish', '1']]) {
-      expect(within(overview).getByText(label).nextElementSibling).toHaveTextContent(count)
-    }
-    expect(screen.queryByRole('heading', { name: /create an event|managing events/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /request to co-host/i })).toBeNull()
-    const shortcuts = within(screen.getByRole('navigation', { name: /quick actions/i }))
-    fireEvent.click(shortcuts.getByRole('link', { name: 'Review Requests' }))
-    expect(screen.getByRole('heading', { name: /manage event requests/i })).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    const attention = () => within(screen.getByRole('region', { name: /needs your attention/i }))
-    expect(attention().getByText('Craft Club, Music Club')).toBeVisible()
-    expect(attention().getByText('2 pending co-host requests')).toBeVisible()
-    fireEvent.click(attention().getByRole('button', { name: 'Review request from Drama Club' }))
-    expect(within(screen.getByRole('dialog', { name: /co-hosting request/i })).getByText('Drama Club')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    fireEvent.click(within(screen.getByRole('navigation', { name: /quick actions/i })).getByRole('link', { name: 'Manage Events' }))
-    expect(screen.getByRole('heading', { name: /managing events/i })).toHaveFocus()
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    fireEvent.click(within(screen.getByRole('navigation', { name: /quick actions/i })).getByRole('button', { name: 'Create Event' }))
-    expect(screen.getByRole('region', { name: /create an event/i })).toHaveFocus()
-    expect(screen.queryByRole('region', { name: /organization dashboard|event overview/i })).toBeNull()
-    expect(screen.queryByRole('heading', { name: /use cohost now/i })).toBeNull()
-    expect(screen.queryByRole('article', { name: cancelledEvent.title })).toBeNull()
-
-    const filter = screen.getByRole('combobox', { name: /filter by status/i })
-    const managedEvents = within(screen.getByRole('region', { name: /managing events/i }))
-    for (const filteredEvent of [draftEvent, event, readyEvent, publishedEvent, cancelledEvent]) {
-      fireEvent.change(filter, { target: { value: filteredEvent.publicationStatus } })
-      expect(screen.getByRole('article', { name: filteredEvent.title })).toBeVisible()
-      expect(managedEvents.getAllByRole('article', {
-        name: (name) => !name.startsWith('Co-host request from '),
-      })).toHaveLength(1)
-    }
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    const recent = within(screen.getByRole('region', { name: /recent events/i }))
-    expect(recent.getAllByRole('link').map((link) => link.textContent)).toEqual([
-      readyEvent.title, event.title, publishedEvent.title,
-    ])
-    const recentOpening = within(recent.getByRole('link', { name: readyEvent.title }).closest('li')!)
-    expect(recentOpening.getByText('Ready to Publish')).toBeVisible()
-    expect(recentOpening.getByText('1 confirmed co-host')).toBeVisible()
-    const recentWorkshop = within(recent.getByRole('link', { name: event.title }).closest('li')!)
-    expect(recentWorkshop.getByText(event.location)).toBeVisible()
-    expect(recentWorkshop.getByText(new Date(2026, 11, 1).toLocaleDateString(undefined, {
-      month: 'long', day: 'numeric', year: 'numeric',
-    }))).toBeVisible()
-    expect(recentWorkshop.getByText('2 pending co-host requests')).toBeVisible()
-    fireEvent.click(recent.getByRole('link', { name: event.title }))
-    expect(screen.getByRole('article', { name: event.title })).toHaveFocus()
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    fireEvent.click(screen.getByRole('link', { name: `Review publication for ${readyEvent.title}` }))
-    expect(screen.getByRole('article', { name: readyEvent.title })).toHaveFocus()
-    fireEvent.click(screen.getByRole('button', { name: /^dashboard$/i }))
-    fireEvent.click(screen.getByRole('link', { name: `Review co-host requests for ${event.title}` }))
-    expect(screen.getByRole('article', { name: event.title })).toHaveFocus()
-    expect(screen.getByRole('combobox', { name: /filter by status/i })).toHaveValue('active')
-    expect(workspace().queryByText('Drama Club')).not.toBeInTheDocument()
-    const review = screen.getByRole('button', { name: 'Review Requests' })
-    expect(review).toBeEnabled()
-    expect(screen.queryByRole('button', { name: 'Complete Collaboration' })).toBeNull()
-    fireEvent.click(review)
-    expect(workspace().getByRole('heading', { name: 'Pending co-host requests (2)' })).toHaveFocus()
-    const craftCard = within(workspace().getByRole('article', { name: 'Co-host request from Craft Club' }))
-    expect(craftCard.getByText('Pending')).toBeVisible()
-    expect(craftCard.getByText('Materials')).toBeVisible()
-    expect(craftCard.getAllByText(request.contributionDescription!)[0]).toBeVisible()
-    const accept = craftCard.getByRole('button', { name: 'Accept request from Craft Club' })
-    expect(accept).toBeVisible()
-    expect(craftCard.getByRole('button', { name: 'Decline request from Craft Club' })).toBeVisible()
-    expect(craftCard.getByText(request.message)).not.toBeVisible()
-    const details = craftCard.getByText('View Details')
-    fireEvent.click(details)
-    expect(craftCard.getByText(request.message)).toBeVisible()
-    expect(craftCard.getByText('Available dates')).toBeVisible()
-    expect(craftCard.getByText('12')).toBeVisible()
-    fireEvent.click(details)
-    expect(craftCard.getByText(request.message)).not.toBeVisible()
-    fireEvent.click(accept)
-    expect(accept).toHaveTextContent('Accepting')
-    expect(accept).toBeDisabled()
-    const decline = workspace().getByRole('button', { name: 'Decline request from Music Club' })
-    expect(decline).toBeDisabled()
-    fireEvent.click(accept)
-    expect(resolveEventRequest).toHaveBeenCalledTimes(1)
-    await act(async () => finishAcceptance())
-    expect(await workspace().findByRole('listitem')).toHaveTextContent('Craft Club')
-    expect(workspace().getByText('1 Confirmed Co-Host')).toBeVisible()
-    expect(workspace().queryByText(/all requests resolved/i)).toBeNull()
-    expect(workspace().queryByRole('article', { name: 'Co-host request from Craft Club' })).toBeNull()
-    expect(screen.getByText('Co-host request from Craft Club accepted.')).toBeVisible()
-    expect(resolveEventRequest).toHaveBeenCalledWith(request, 'accepted', host.ownerId, host.id)
-    expect(workspace().getByRole('heading', { name: 'Pending co-host requests (1)' })).toBeVisible()
-    expect(review).toHaveTextContent('Review Requests')
-    vi.mocked(resolveEventRequest).mockRejectedValueOnce(new Error('Network unavailable'))
-    fireEvent.click(decline)
-    expect(await screen.findByText('Could not decline the request from Music Club. Try again.')).toBeVisible()
-    expect(decline).toBeEnabled()
-    fireEvent.click(decline)
-    const complete = await screen.findByRole('button', { name: 'Complete Collaboration' })
-    expect(workspace().getByText(/all requests resolved/i)).toBeVisible()
-    expect(workspace().queryByRole('article', { name: 'Co-host request from Music Club' })).toBeNull()
-    expect(resolveEventRequest).toHaveBeenCalledWith(second, 'declined', host.ownerId, host.id)
-    expect(updateEventItem).not.toHaveBeenCalled()
-    fireEvent.click(complete)
-    fireEvent.click(screen.getByRole('checkbox', { name: /confirm all necessary collaboration/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Mark Ready to Publish' }))
-    fireEvent.click(await within(screen.getByRole('article', { name: event.title })).findByRole('button', { name: 'Publish' }))
-    expect(publishEvent).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Confirm Publish' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('checkbox', { name: /confirm these event details/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm Publish' }))
-    expect(await workspace().findByText('This event is published.')).toBeVisible()
-    expect(publishEvent).toHaveBeenCalledExactlyOnceWith(event.id)
-    expect(screen.getByRole('button', { name: /^events$/i })).toHaveAttribute('aria-current', 'page')
-    fireEvent.click(screen.getByRole('button', { name: /^requests$/i }))
-    expect(screen.getByRole('heading', { name: /manage event requests/i })).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: /^inbox$/i }))
-    expect(screen.getByRole('heading', { name: /^inbox$/i })).toBeVisible()
   })
 
   it('restores a locally saved profile after the app reloads', async () => {

@@ -522,10 +522,7 @@ describe('Firebase account access', () => {
 describe('event requests', () => {
   beforeEach(() => {
     vi.mocked(runTransaction).mockImplementation(async (_db, callback) => callback({
-      get: vi.fn(async () => ({
-        exists: () => true,
-        data: () => ({ ...event, publicationStatus: 'pending_collaboration' }),
-      })),
+      get: vi.fn(async () => ({ exists: () => true, data: () => event })),
       set: setDoc,
     } as never))
   })
@@ -538,7 +535,7 @@ describe('event requests', () => {
       requesterProfileType: 'organization',
       attendeeCount: 0,
       resourcesProvided: ['Venue'],
-      contributionDescription: ' We can provide the venue.\r\nWe can help set up. ',
+      contributionDescription: 'We can provide the venue.',
       estimatedAttendees: 25,
     })
 
@@ -559,7 +556,7 @@ describe('event requests', () => {
         status: 'pending',
         attendeeCount: 0,
         resourcesProvided: ['Venue'],
-        contributionDescription: 'We can provide the venue. We can help set up.',
+        contributionDescription: 'We can provide the venue.',
         estimatedAttendees: 25,
       }),
     )
