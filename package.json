@@ -25,6 +25,7 @@
     "@babel/core": "^8.0.6",
     "@eslint/js": "^10.0.1",
     "@firebase/rules-unit-testing": "^6.0.0",
+    "@playwright/test": "^1.65.1",
     "@rolldown/plugin-babel": "^0.2.4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
