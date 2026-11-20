@@ -98,12 +98,14 @@ export interface EventRequest {
 export interface InboxNotice {
   id: string
   profileId: string
-  title: string
+  eventTitle: string
+  status: EventRequest['status']
   message: string
   type: 'incoming' | 'outgoing'
   relatedEventId?: string
   requestId?: string
   requestType?: EventRequest['requestType']
   createdAt: string
+  resolvedAt?: string
   isRead: boolean
 }

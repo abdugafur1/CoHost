@@ -23,6 +23,53 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('clean launch using the ac
   afterEach(async () => { await env.clearFirestore(); session.database = null; session.uid = null; vi.unstubAllEnvs() })
   afterAll(async () => { await env.cleanup() })
 
+  it.each(['We can provide a venue.', 'We can provide a venue.\nOur members can help set up.'])(
+    'submits ten co-host dates with unknown attendance and a blank message (%j)',
+    async (contributionDescription) => {
+      vi.stubEnv('VITE_PUBLICATION_V2_ENABLED', 'true')
+      const host = organization('host'), partner = organization('partner')
+      for (const profile of [host, partner]) {
+        as(profile.ownerId)
+        await saveUserProfile(profile)
+        await ensureOrganizationAccount(profile)
+      }
+      const dates = Array.from({ length: 10 }, (_, index) => `2026-12-${String(index + 1).padStart(2, '0')}`)
+      const event: EventItem = {
+        id: 'ten-dates', hostId: host.id, hostOwnerId: host.ownerId, hostName: host.name,
+        hostProfileType: 'organization', title: 'Venue collaboration', description: 'Workshop',
+        location: 'Campus', audience: 'everyone', dateOptions: dates, capacity: 20, attendees: 0,
+        createdAt: '2026-11-01', publicationStatus: 'draft', collaborationRequirementsCompleted: false,
+        resourcesNeeded: ['Venue'],
+      }
+      const hostDb = as(host.ownerId)
+      await saveEventItem(event)
+      const storedEvent = (await getDoc(doc(hostDb, 'events', event.id))).data() as EventItem
+      await updateEventItem({ ...storedEvent, publicationStatus: 'pending_collaboration' })
+      const partnerDb = as(partner.ownerId)
+      const request: EventRequest = {
+        id: createEventRequestId(event.id, partner.ownerId, partner.id, 'cohost'),
+        requestType: 'cohost', eventId: event.id, eventTitle: event.title,
+        hostOwnerId: host.ownerId, hostProfileId: host.id, requesterOwnerId: partner.ownerId,
+        requesterProfileId: partner.id, requesterName: partner.name, requesterProfileType: 'organization',
+        availableDates: dates, attendeeCount: 0, message: '', status: 'pending',
+        createdAt: '2026-11-01', resourcesProvided: ['Venue'], contributionDescription,
+      }
+      await expect(saveEventRequest({ ...request, availableDates: ['2026-12-11'] }))
+        .rejects.toThrow('Some selected dates are no longer available.')
+      await saveEventRequest(request)
+      const stored = (await getDoc(doc(partnerDb, 'cohostRequests', request.id))).data()
+      expect(stored).toMatchObject({
+        availableDates: dates, attendeeCount: 0, message: '',
+        contributionDescription: contributionDescription.replace('\n', ' '),
+      })
+      expect(stored).not.toHaveProperty('estimatedAttendees')
+      await expect(saveEventRequest(request)).rejects.toThrow('already been sent from this profile')
+      expect((await getDoc(doc(partnerDb, 'eventCollaboration', event.id))).data()).toMatchObject({
+        pendingCount: 1, totalRequests: 1, revision: 1, lastRequestId: request.id,
+      })
+    },
+  )
+
   it('runs profile creation through collaboration, publication, public attribution and student acceptance from empty data', async () => {
     vi.stubEnv('VITE_PUBLICATION_V2_ENABLED', 'true')
     const host = organization('host'), partner = organization('partner'), declined = organization('declined')
