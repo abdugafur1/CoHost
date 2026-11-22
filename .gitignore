@@ -10,6 +10,10 @@
 .runtimeconfig.json
 .firebase/
 
+### Playwright ###
+/playwright-report/
+/test-results/
+
 ### macOS ###
 # General
 .DS_Store
