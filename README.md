@@ -55,6 +55,18 @@ npm test -- --run
 
 > **Firebase caution:** A local development server may still connect to the production Firebase project unless explicitly configured to use emulators. Avoid creating or altering real project data during exploratory testing.
 
+### Browser tests with Playwright
+
+Use Node.js 24 LTS, Java 21 or newer, and the [Firebase CLI](https://firebase.google.com/docs/cli#install_the_firebase_cli). Check that `java -version` and `firebase --version` work in the same terminal where you run the tests.
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The test command starts the Auth and Firestore emulators and shuts them down when Playwright exits. Playwright starts a separate Vite server on port 4173 in `e2e` mode, which connects to the local emulators under the `demo-cohost` project. The sample tests cover anonymous sign-in and creating and restoring a student profile. Add browser tests in `e2e/` with the `.e2e.ts` suffix.
+
 ## Team Collaboration
 
 Submit changes through a feature branch and a GitHub pull request. Review and test changes before merging them into `main`. Coordinate Firebase deployments with the team so that one deployment does not unexpectedly replace another version of the website.
