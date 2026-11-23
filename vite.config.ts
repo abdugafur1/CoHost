@@ -14,8 +14,14 @@ export default defineConfig({
     }),
   ],
   test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: './vite-setup.ts',
-  },
+  globals: true,
+  environment: 'jsdom',
+  setupFiles: './vite-setup.ts',
+  exclude: [
+    '**/node_modules/**',
+    '**/tests/**',
+    '**/playwright-report/**',
+    '**/test-results/**',
+  ],
+},
 })
